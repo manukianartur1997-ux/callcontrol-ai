@@ -20,6 +20,19 @@ jobs:
           node-version: 22
       - name: Build static assets
         run: node build-pages.js
+      - name: Check Cloudflare secrets are present
+        run: |
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          echo "Cloudflare secrets are present"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Check Cloudflare token
+        run: npx wrangler@latest whoami
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - name: Deploy Worker
         run: npx wrangler@latest deploy
         env:
