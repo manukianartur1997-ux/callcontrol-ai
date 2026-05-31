@@ -1,0 +1,3148 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CallControl AI Demo Room</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #090d12;
+        --surface: #101720;
+        --surface-2: #151f2a;
+        --surface-3: #1b2835;
+        --line: #263746;
+        --line-soft: rgba(148, 163, 184, 0.16);
+        --text: #ecf4fb;
+        --muted: #9aabbc;
+        --faint: #637587;
+        --blue: #38bdf8;
+        --blue-2: #0ea5e9;
+        --green: #22c55e;
+        --green-soft: rgba(34, 197, 94, 0.12);
+        --yellow: #f59e0b;
+        --yellow-soft: rgba(245, 158, 11, 0.14);
+        --red: #fb7185;
+        --red-soft: rgba(251, 113, 133, 0.13);
+        --purple: #a78bfa;
+        --shadow: 0 20px 50px rgba(0, 0, 0, 0.28);
+      }
+
+      body[data-theme="light"] {
+        color-scheme: light;
+        --bg: #dbeaf5;
+        --surface: #f4f9fd;
+        --surface-2: #e8f2fa;
+        --surface-3: #d8e8f3;
+        --line: #9fb6c9;
+        --line-soft: rgba(51, 65, 85, 0.18);
+        --text: #0f2034;
+        --muted: #30485f;
+        --faint: #516a80;
+        --blue: #0369a1;
+        --blue-2: #0284c7;
+        --green: #15803d;
+        --yellow: #b45309;
+        --red: #be123c;
+        --shadow: 0 18px 42px rgba(15, 23, 42, 0.1);
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 14px;
+      }
+
+      button, input, textarea, select { font: inherit; }
+      button { cursor: pointer; }
+
+      .shell {
+        display: grid;
+        grid-template-columns: 236px minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        background: #0b1118;
+        border-right: 1px solid var(--line-soft);
+        display: flex;
+        flex-direction: column;
+        transition: width 180ms ease, transform 180ms ease;
+      }
+
+      body[data-theme="light"] .sidebar {
+        background: #d5e5f0;
+      }
+
+      body[data-theme="light"] .topbar {
+        background: rgba(234, 241, 247, 0.9);
+      }
+
+      body[data-theme="light"] input,
+      body[data-theme="light"] textarea,
+      body[data-theme="light"] select,
+      body[data-theme="light"] .crm-note {
+        background: #f9fcff;
+        color: var(--text);
+      }
+
+      body[data-theme="light"] .bar,
+      body[data-theme="light"] .criteria label {
+        background: #e5eef7;
+      }
+
+      body[data-theme="light"] .ghost,
+      body[data-theme="light"] .icon-button,
+      body[data-theme="light"] .language-select,
+      body[data-theme="light"] .theme-toggle {
+        background: rgba(255,255,255,0.5);
+        color: var(--text);
+      }
+
+      .shell.sidebar-collapsed { grid-template-columns: 72px minmax(0, 1fr); }
+      .shell.sidebar-collapsed .sidebar { width: 72px; }
+      .shell.sidebar-collapsed .brand-name,
+      .shell.sidebar-collapsed .brand-sub,
+      .shell.sidebar-collapsed .nav-label,
+      .shell.sidebar-collapsed .nav button .nav-text,
+      .shell.sidebar-collapsed .sidebar-cta,
+      .shell.sidebar-collapsed .nav-count { display: none; }
+      .shell.sidebar-collapsed .brand { padding-left: 18px; padding-right: 18px; }
+      .shell.sidebar-collapsed .nav button { justify-content: center; padding: 12px 8px; }
+      .shell.sidebar-collapsed .nav-code { display: grid; }
+
+      .brand {
+        padding: 22px 18px 18px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .brand-mark {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+      }
+
+      .mark {
+        width: 34px;
+        height: 34px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(135deg, var(--blue), var(--blue-2));
+        color: #041018;
+        font-weight: 900;
+        letter-spacing: -0.08em;
+      }
+
+      .brand-name {
+        font-weight: 850;
+        letter-spacing: -0.02em;
+        font-size: 17px;
+      }
+
+      .brand-sub {
+        margin-top: 2px;
+        color: var(--faint);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+      }
+
+      .nav {
+        padding: 14px 10px;
+        flex: 1;
+      }
+
+      .nav-label {
+        padding: 10px 10px 6px;
+        color: var(--faint);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+      }
+
+      .nav button {
+        width: 100%;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        border-radius: 7px;
+        padding: 10px 11px;
+        text-align: left;
+        display: flex;
+        justify-content: flex-start;
+        align-items: center;
+        gap: 10px;
+        margin: 2px 0;
+      }
+
+      .nav-code {
+        display: grid;
+        width: 28px;
+        height: 28px;
+        place-items: center;
+        border-radius: 7px;
+        border: 1px solid var(--line-soft);
+        color: var(--blue);
+        font-weight: 850;
+        font-size: 15px;
+        line-height: 1;
+      }
+
+      .nav-text {
+        flex: 1;
+        min-width: 0;
+        padding-left: 1px;
+      }
+
+      .nav button:hover,
+      .nav button.active {
+        color: var(--text);
+        background: rgba(56, 189, 248, 0.08);
+        border-color: rgba(56, 189, 248, 0.16);
+      }
+
+      .nav-count {
+        margin-left: auto;
+        min-width: 22px;
+        text-align: center;
+        padding: 2px 6px;
+        border-radius: 999px;
+        background: rgba(251, 113, 133, 0.16);
+        color: var(--red);
+        font-size: 11px;
+        font-weight: 750;
+      }
+
+      .sidebar-cta {
+        padding: 14px;
+        border-top: 1px solid var(--line-soft);
+      }
+
+      .primary {
+        border: 0;
+        background: linear-gradient(135deg, var(--blue), var(--blue-2));
+        color: #041018;
+        font-weight: 850;
+        border-radius: 7px;
+        padding: 11px 14px;
+        box-shadow: 0 14px 34px rgba(14, 165, 233, 0.24);
+      }
+
+      .primary.full { width: 100%; }
+      .primary:hover { filter: brightness(1.06); }
+
+      .ghost {
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.02);
+        color: var(--text);
+        border-radius: 7px;
+        padding: 10px 13px;
+      }
+
+      .ghost:hover { border-color: rgba(56, 189, 248, 0.45); }
+
+      .tiny-note {
+        margin-top: 8px;
+        color: var(--faint);
+        font-size: 11px;
+        text-align: center;
+      }
+
+      .main { min-width: 0; }
+
+      .topbar {
+        height: 58px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 22px;
+        border-bottom: 1px solid var(--line-soft);
+        background: rgba(9, 13, 18, 0.88);
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        backdrop-filter: blur(14px);
+      }
+
+      .icon-button {
+        width: 36px;
+        height: 36px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.02);
+        color: var(--text);
+        border-radius: 7px;
+        font-weight: 850;
+      }
+
+      .language-switch, .segmented {
+        display: inline-flex;
+        gap: 4px;
+        padding: 3px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.025);
+        border-radius: 8px;
+      }
+
+      .language-select {
+        width: auto;
+        min-width: 86px;
+        padding: 8px 28px 8px 10px;
+        background: rgba(255,255,255,0.025);
+      }
+
+      .theme-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 3px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(255,255,255,0.025);
+      }
+
+      .theme-toggle button {
+        border: 0;
+        border-radius: 999px;
+        padding: 6px 9px;
+        color: var(--muted);
+        background: transparent;
+        font-size: 12px;
+      }
+
+      .theme-toggle button.active {
+        color: #041018;
+        background: var(--blue);
+        font-weight: 850;
+      }
+
+      .language-switch button, .segmented button {
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        border-radius: 6px;
+        padding: 6px 9px;
+        font-size: 12px;
+      }
+
+      .language-switch button.active, .segmented button.active {
+        color: #041018;
+        background: var(--blue);
+        font-weight: 850;
+      }
+
+      .top-title {
+        font-weight: 850;
+        letter-spacing: -0.02em;
+        font-size: 17px;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 9px;
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.025);
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .chip.blue { color: var(--blue); border-color: rgba(56, 189, 248, 0.22); background: rgba(56, 189, 248, 0.08); }
+      .chip.red { color: var(--red); border-color: rgba(251, 113, 133, 0.24); background: var(--red-soft); }
+      .chip.green { color: var(--green); border-color: rgba(34, 197, 94, 0.24); background: var(--green-soft); }
+      .chip.yellow { color: var(--yellow); border-color: rgba(245, 158, 11, 0.25); background: var(--yellow-soft); }
+
+      .spacer { flex: 1; }
+
+      .content {
+        padding: 22px;
+        max-width: 1440px;
+      }
+
+      .screen { display: none; }
+      .screen.active { display: block; animation: reveal 160ms ease-out; }
+      @keyframes reveal {
+        from { opacity: 0; transform: translateY(6px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      .section-head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 16px;
+      }
+
+      h1, h2, h3, p { margin-top: 0; }
+      h1 {
+        margin-bottom: 6px;
+        font-size: clamp(26px, 3vw, 42px);
+        letter-spacing: -0.045em;
+        line-height: 1.02;
+      }
+      h2 {
+        margin-bottom: 12px;
+        font-size: 18px;
+        letter-spacing: -0.02em;
+      }
+      h3 {
+        margin-bottom: 8px;
+        font-size: 14px;
+        letter-spacing: -0.015em;
+      }
+      p { color: var(--muted); line-height: 1.58; }
+
+      .grid { display: grid; gap: 14px; }
+      .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .two { grid-template-columns: minmax(0, 1.25fr) minmax(340px, 0.75fr); }
+      .three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+      .hero-panel {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+        gap: 14px;
+        margin-bottom: 14px;
+      }
+
+      .hero-copy {
+        border: 1px solid rgba(56, 189, 248, 0.22);
+        background: linear-gradient(135deg, rgba(56,189,248,0.1), rgba(34,197,94,0.04)), var(--surface);
+      }
+
+      .hero-copy h2 {
+        font-size: clamp(24px, 2.4vw, 34px);
+        line-height: 1.05;
+        letter-spacing: -0.045em;
+        margin-bottom: 10px;
+      }
+
+      .hero-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 16px;
+      }
+
+      .proof-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 9px;
+        margin-top: 16px;
+      }
+
+      .proof-tile {
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid var(--line-soft);
+        background: rgba(255,255,255,0.025);
+      }
+
+      .proof-tile strong {
+        display: block;
+        color: var(--text);
+        margin-bottom: 3px;
+      }
+
+      .proof-tile span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .audit-preview-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .audit-preview-item {
+        min-height: 118px;
+        padding: 12px;
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        background: rgba(255,255,255,0.018);
+      }
+
+      .audit-preview-item strong {
+        display: block;
+        margin-bottom: 5px;
+      }
+
+      .audit-preview-item p {
+        margin: 0;
+        font-size: 12px;
+      }
+
+      .compare-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .compare-list {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .compare-list li {
+        display: flex;
+        gap: 8px;
+        align-items: flex-start;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .compare-list li::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        margin-top: 6px;
+        border-radius: 999px;
+        background: var(--faint);
+        flex: 0 0 auto;
+      }
+
+      .compare-list.positive li::before { background: var(--green); }
+      .compare-list.negative li::before { background: var(--red); }
+
+      .quick-audit {
+        display: grid;
+        gap: 10px;
+      }
+
+      .quick-audit .step {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+      }
+
+      .step-num {
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        display: grid;
+        place-items: center;
+        background: rgba(56,189,248,0.1);
+        border: 1px solid rgba(56,189,248,0.22);
+        color: var(--blue);
+        font-weight: 900;
+      }
+
+      .card {
+        background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.012)), var(--surface);
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        padding: 16px;
+        box-shadow: var(--shadow);
+      }
+
+      .card.compact { padding: 13px; }
+      .card.red { border-color: rgba(251, 113, 133, 0.22); background: linear-gradient(180deg, rgba(251,113,133,0.08), rgba(251,113,133,0.02)), var(--surface); }
+      .card.blue { border-color: rgba(56, 189, 248, 0.22); background: linear-gradient(180deg, rgba(56,189,248,0.08), rgba(56,189,248,0.02)), var(--surface); }
+      .card.green { border-color: rgba(34, 197, 94, 0.2); background: linear-gradient(180deg, rgba(34,197,94,0.08), rgba(34,197,94,0.02)), var(--surface); }
+
+      .metric-label {
+        color: var(--faint);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.11em;
+      }
+      .metric-value {
+        margin-top: 8px;
+        font-size: 32px;
+        line-height: 1;
+        font-weight: 900;
+        letter-spacing: -0.045em;
+      }
+      .metric-sub {
+        margin-top: 7px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .value { color: var(--blue); }
+      .risk { color: var(--red); }
+      .ok { color: var(--green); }
+      .warn { color: var(--yellow); }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+      th, td {
+        padding: 10px 9px;
+        border-bottom: 1px solid var(--line-soft);
+        text-align: left;
+        vertical-align: middle;
+      }
+      th {
+        color: var(--faint);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        font-weight: 750;
+      }
+      tr:last-child td { border-bottom: 0; }
+
+      .person {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 0;
+      }
+      .avatar {
+        width: 31px;
+        height: 31px;
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        background: var(--surface-3);
+        border: 1px solid var(--line);
+        color: var(--text);
+        font-weight: 850;
+        font-size: 11px;
+        flex: 0 0 auto;
+      }
+      .person strong {
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .person span { display: block; color: var(--faint); font-size: 12px; }
+
+      .bar {
+        height: 7px;
+        border-radius: 999px;
+        background: #0c1218;
+        overflow: hidden;
+        border: 1px solid rgba(148, 163, 184, 0.08);
+      }
+      .bar > i {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+      }
+
+      .split-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 7px;
+      }
+
+      .list { display: grid; gap: 9px; }
+      .item {
+        padding: 11px;
+        border: 1px solid var(--line-soft);
+        border-radius: 7px;
+        background: rgba(255,255,255,0.018);
+      }
+
+      .item strong { display: block; margin-bottom: 4px; }
+      .item p { margin: 0; font-size: 13px; }
+      .item.red { border-color: rgba(251, 113, 133, 0.22); background: var(--red-soft); }
+      .item.green { border-color: rgba(34, 197, 94, 0.2); background: var(--green-soft); }
+      .item.yellow { border-color: rgba(245, 158, 11, 0.22); background: var(--yellow-soft); }
+
+      .settings-list { display: grid; gap: 12px; }
+      .settings-card {
+        border: 1px solid var(--line-soft);
+        background: rgba(255,255,255,0.018);
+        border-radius: 8px;
+        padding: 13px;
+      }
+      .settings-card summary {
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-weight: 850;
+      }
+      .settings-card summary::-webkit-details-marker { display: none; }
+      .criteria {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .criteria label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 9px;
+        border-radius: 7px;
+        background: #0c1218;
+        border: 1px solid var(--line-soft);
+        color: var(--text);
+        font-size: 12px;
+      }
+      .criteria input { width: auto; }
+
+      .manager-recs { display: grid; gap: 9px; }
+      .manager-rec {
+        display: grid;
+        grid-template-columns: 140px minmax(0, 1fr) 180px;
+        gap: 12px;
+        align-items: center;
+        padding: 11px;
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        background: rgba(255,255,255,0.018);
+      }
+      .manager-rec strong { display: block; margin-bottom: 2px; }
+      .manager-rec p { margin: 0; font-size: 12px; }
+
+      .progress-list { display: grid; gap: 10px; }
+      .progress-row {
+        display: grid;
+        grid-template-columns: 170px minmax(0, 1fr) 52px;
+        align-items: center;
+        gap: 12px;
+      }
+      .progress-row strong { font-size: 13px; }
+      .progress-row span { color: var(--muted); font-size: 12px; }
+      .progress-row .bar { height: 9px; }
+
+      .feature-matrix {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .feature-card {
+        min-height: 138px;
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        padding: 14px;
+        background: rgba(255,255,255,0.018);
+      }
+
+      .feature-card strong { display: block; margin-bottom: 6px; font-size: 14px; }
+      .feature-card p { margin: 0; font-size: 12px; }
+
+      .feature-icon {
+        width: 34px;
+        height: 34px;
+        display: grid;
+        place-items: center;
+        border-radius: 9px;
+        color: #041018;
+        background: var(--blue);
+        font-weight: 900;
+        margin-bottom: 10px;
+      }
+
+      .integration-card summary {
+        cursor: pointer;
+        list-style: none;
+        display: grid;
+        grid-template-columns: 56px minmax(0, 1fr) 28px;
+        grid-template-rows: auto auto;
+        align-items: center;
+        gap: 3px 12px;
+        min-height: 74px;
+        margin: -8px -8px 0;
+        padding: 8px;
+        border-radius: 7px;
+      }
+
+      .integration-card summary::-webkit-details-marker { display: none; }
+
+      .integration-card summary::after {
+        content: "⌄";
+        grid-column: 3;
+        grid-row: 1 / span 2;
+        width: 28px;
+        height: 42px;
+        display: grid;
+        place-items: center;
+        color: var(--faint);
+        font-size: 16px;
+      }
+
+      .integration-card[open] summary::after { content: "⌃"; }
+
+      .integration-card .feature-icon {
+        grid-column: 1;
+        grid-row: 1 / span 2;
+        width: 48px;
+        height: 48px;
+        margin: 0;
+        font-size: 20px;
+        justify-self: center;
+      }
+
+      .integration-card summary strong {
+        grid-column: 2;
+        grid-row: 1;
+        margin: 0;
+      }
+
+      .integration-card summary p {
+        grid-column: 2;
+        grid-row: 2;
+      }
+
+      .wide-roadmap {
+        display: grid;
+        grid-template-columns: 1.1fr repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .wide-roadmap .roadmap-item { min-height: 142px; }
+
+      .risk-state-high { color: var(--red) !important; border-color: rgba(251,113,133,0.3) !important; background: var(--red-soft) !important; }
+      .risk-state-medium { color: var(--yellow) !important; border-color: rgba(245,158,11,0.3) !important; background: var(--yellow-soft) !important; }
+      .risk-state-low { color: var(--green) !important; border-color: rgba(34,197,94,0.28) !important; background: var(--green-soft) !important; }
+
+      .roadmap {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .roadmap-item {
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        padding: 13px;
+        background: rgba(255,255,255,0.018);
+      }
+
+      .roadmap-item .split-row { align-items: flex-start; }
+
+      .pipeline {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .pipeline-step {
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        padding: 12px;
+        background: rgba(255,255,255,0.018);
+      }
+
+      .pipeline-step strong { display: block; margin-bottom: 5px; }
+      .pipeline-step p { margin: 0; font-size: 12px; }
+
+      .faq-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .faq-item {
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        background: rgba(255,255,255,0.018);
+        padding: 14px;
+      }
+
+      .faq-item h2 { font-size: 15px; margin-bottom: 7px; }
+      .faq-item p { margin: 0; font-size: 13px; }
+
+      .faq-item summary {
+        cursor: pointer;
+        list-style: none;
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .faq-item summary::-webkit-details-marker { display: none; }
+      .faq-item summary::after { content: "⌄"; color: var(--blue); font-size: 16px; }
+      .faq-item[open] summary::after { content: "⌃"; }
+      .faq-item p { margin-top: 10px; }
+
+      .report-hero {
+        display: grid;
+        grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+        gap: 14px;
+      }
+
+      .score-circle {
+        width: 128px;
+        height: 128px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        margin: 10px auto;
+        border: 10px solid rgba(251,113,133,0.22);
+        color: var(--red);
+        font-size: 34px;
+        font-weight: 950;
+        letter-spacing: -0.06em;
+      }
+
+      .crm-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .crm-note {
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        padding: 11px;
+        background: #0c1218;
+      }
+
+      .crm-note strong { display: block; margin-bottom: 5px; }
+      .crm-note p { margin: 0; font-size: 12px; }
+
+      .security-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .settings-card summary::after {
+        content: "⌄";
+        color: var(--faint);
+        font-size: 14px;
+      }
+
+      .settings-card[open] summary::after { content: "⌃"; }
+
+      .call-picker {
+        display: grid;
+        gap: 8px;
+      }
+
+      .call-option {
+        text-align: left;
+        border: 1px solid var(--line-soft);
+        background: rgba(255,255,255,0.018);
+        color: var(--text);
+        border-radius: 7px;
+        padding: 11px;
+      }
+
+      .call-option.active {
+        border-color: rgba(56, 189, 248, 0.44);
+        background: rgba(56, 189, 248, 0.08);
+      }
+
+      .call-option strong { display: block; margin-bottom: 3px; }
+      .call-option span { display: block; color: var(--muted); font-size: 12px; }
+
+      .transcript {
+        background: #070a0f;
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        padding: 14px;
+        display: grid;
+        gap: 10px;
+      }
+      .line {
+        padding: 10px 11px;
+        border-radius: 7px;
+        background: rgba(255,255,255,0.025);
+      }
+      .speaker {
+        color: var(--faint);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.09em;
+        margin-bottom: 4px;
+      }
+      mark {
+        background: rgba(251, 113, 133, 0.22);
+        color: #ffd5dc;
+        border-radius: 4px;
+        padding: 1px 4px;
+      }
+
+      .heatmap {
+        display: grid;
+        grid-template-columns: 150px repeat(5, minmax(92px, 1fr));
+        gap: 5px;
+      }
+      .heat-head, .heat-name, .heat-cell {
+        border-radius: 6px;
+        padding: 10px;
+        min-height: 42px;
+        display: flex;
+        align-items: center;
+      }
+      .heat-head {
+        color: var(--faint);
+        background: rgba(255,255,255,0.025);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .heat-name {
+        background: rgba(255,255,255,0.025);
+        font-weight: 780;
+      }
+      .heat-cell {
+        justify-content: center;
+        font-weight: 900;
+        border: 1px solid transparent;
+      }
+      .heat-green { background: rgba(34, 197, 94, 0.18); color: #8ff3b4; border-color: rgba(34, 197, 94, 0.22); }
+      .heat-yellow { background: rgba(245, 158, 11, 0.16); color: #ffd37b; border-color: rgba(245, 158, 11, 0.22); }
+      .heat-red { background: rgba(251, 113, 133, 0.18); color: #ffb3bf; border-color: rgba(251, 113, 133, 0.25); }
+
+      .pricing {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+      }
+      .price-card {
+        position: relative;
+        min-height: 218px;
+      }
+      .price-card.featured {
+        border-color: rgba(56, 189, 248, 0.34);
+        background: linear-gradient(180deg, rgba(56,189,248,0.11), rgba(56,189,248,0.025)), var(--surface);
+      }
+      .price {
+        font-size: 31px;
+        font-weight: 930;
+        letter-spacing: -0.05em;
+        margin: 8px 0;
+      }
+      .price small {
+        font-size: 12px;
+        color: var(--muted);
+        font-weight: 650;
+        letter-spacing: 0;
+      }
+      .price-card ul {
+        margin: 11px 0 0;
+        padding-left: 17px;
+        color: var(--muted);
+        line-height: 1.55;
+        font-size: 13px;
+      }
+
+      .lead-form {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 11px;
+      }
+      label {
+        display: grid;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      label.full { grid-column: 1 / -1; }
+      input, textarea, select {
+        width: 100%;
+        color: var(--text);
+        background: #0c1218;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 10px 11px;
+        outline: 0;
+      }
+      textarea { min-height: 92px; resize: vertical; }
+      input:focus, textarea:focus, select:focus { border-color: rgba(56, 189, 248, 0.7); }
+
+      .toast {
+        position: fixed;
+        right: 22px;
+        bottom: 22px;
+        width: min(420px, calc(100vw - 32px));
+        padding: 14px;
+        border-radius: 8px;
+        border: 1px solid rgba(34, 197, 94, 0.25);
+        background: #0d1b16;
+        color: var(--text);
+        box-shadow: var(--shadow);
+        display: none;
+        z-index: 60;
+      }
+      .toast.show { display: block; animation: reveal 160ms ease-out; }
+      .toast p { margin: 5px 0 0; font-size: 13px; }
+
+      .mobile-tabs {
+        display: none;
+        gap: 8px;
+        overflow-x: auto;
+        padding-bottom: 10px;
+        margin-bottom: 12px;
+      }
+      .mobile-tabs button {
+        flex: 0 0 auto;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        color: var(--muted);
+        border-radius: 999px;
+        padding: 8px 11px;
+      }
+      .mobile-tabs button.active {
+        color: var(--blue);
+        border-color: rgba(56, 189, 248, 0.42);
+      }
+
+      .small { color: var(--muted); font-size: 12px; }
+      .nowrap { white-space: nowrap; }
+      .mt { margin-top: 14px; }
+      .mb { margin-bottom: 14px; }
+
+      @media (max-width: 1120px) {
+        .kpis, .four, .pricing, .audit-preview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .two, .three, .hero-panel, .report-hero { grid-template-columns: 1fr; }
+      }
+
+      @media (max-width: 760px) {
+        .shell { grid-template-columns: 1fr; }
+        .sidebar { display: none; }
+        .topbar { position: static; height: auto; flex-wrap: wrap; padding: 14px; }
+        .content { padding: 14px; }
+        .mobile-tabs { display: flex; }
+        .kpis, .four, .pricing, .lead-form { grid-template-columns: 1fr; }
+        .feature-matrix, .roadmap, .pipeline, .security-grid, .crm-grid, .proof-grid, .faq-list, .audit-preview-grid, .compare-grid { grid-template-columns: 1fr; }
+        .heatmap {
+          grid-template-columns: 120px repeat(5, minmax(82px, 1fr));
+          overflow-x: auto;
+          min-width: 640px;
+        }
+        .heat-wrap { overflow-x: auto; }
+        th, td { font-size: 12px; padding: 9px 7px; }
+        .criteria, .manager-rec { grid-template-columns: 1fr; }
+      }
+
+      @media print {
+        body { background: white; color: #111827; }
+        .sidebar, .topbar, .mobile-tabs, .primary, .ghost, .toast { display: none !important; }
+        .shell { display: block; }
+        .content { padding: 0; max-width: none; }
+        .screen { display: none !important; }
+        #screen-report { display: block !important; }
+        .card { box-shadow: none; background: white; border-color: #e5e7eb; color: #111827; break-inside: avoid; }
+        p, .small, .metric-sub, .person span { color: #475569; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell" id="appShell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">
+            <div class="mark">AI</div>
+            <div>
+              <div class="brand-name">CallControl AI</div>
+              <div class="brand-sub">Аналитика звонков</div>
+            </div>
+          </div>
+        </div>
+
+        <nav class="nav" id="desktopNav">
+          <div class="nav-label">Демо-комната</div>
+          <button class="active" data-screen="dashboard"><span class="nav-code">⌂</span><span class="nav-text">Главная</span> <span class="nav-count">24</span></button>
+          <button data-screen="owner"><span class="nav-code">▦</span><span class="nav-text">Кабинет руководителя</span></button>
+          <button data-screen="call"><span class="nav-code">◉</span><span class="nav-text">Разбор звонка</span></button>
+          <button data-screen="heatmap"><span class="nav-code">▥</span><span class="nav-text">Карта навыков</span></button>
+          <button data-screen="coaching"><span class="nav-code">✎</span><span class="nav-text">Коучинг</span></button>
+          <button data-screen="report"><span class="nav-code">▤</span><span class="nav-text">Недельный отчет</span></button>
+          <button data-screen="checklists"><span class="nav-code">☑</span><span class="nav-text">Чек-листы</span></button>
+          <button data-screen="integrations"><span class="nav-code">⇄</span><span class="nav-text">Интеграции</span></button>
+          <button data-screen="admin"><span class="nav-code">⚙</span><span class="nav-text">Админка</span></button>
+          <button data-screen="roadmap"><span class="nav-code">↗</span><span class="nav-text">Roadmap</span></button>
+          <div class="nav-label">Запуск</div>
+          <button data-screen="usecases"><span class="nav-code">◎</span><span class="nav-text">Use Cases</span></button>
+          <button data-screen="sample"><span class="nav-code">▣</span><span class="nav-text">Sample Report</span></button>
+          <button data-screen="implementation"><span class="nav-code">⇢</span><span class="nav-text">Внедрение</span></button>
+          <button data-screen="pricing"><span class="nav-code">$</span><span class="nav-text">Планы</span></button>
+          <button data-screen="faq"><span class="nav-code">?</span><span class="nav-text">FAQ</span></button>
+          <button data-screen="lead"><span class="nav-code">→</span><span class="nav-text">Заявка</span></button>
+        </nav>
+
+        <div class="sidebar-cta">
+          <button class="primary full" data-jump="lead">Получить бесплатный mini-audit</button>
+          <div class="tiny-note">1 компания · до 5 звонков · до 15 мин каждый</div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <button class="icon-button" id="sidebarToggle" title="Свернуть меню">≡</button>
+          <div class="top-title" id="topTitle">Главная</div>
+          <span class="chip blue">Демо-режим</span>
+          <span class="spacer"></span>
+          <div class="theme-toggle" id="themeToggle" aria-label="Режим отображения">
+            <button class="active" type="button" data-theme="dark">Dark</button>
+            <button type="button" data-theme="light">Light</button>
+          </div>
+          <select class="language-select" id="languageSelect" aria-label="Язык интерфейса">
+            <option value="ru">RU</option>
+            <option value="uk">UA</option>
+            <option value="en">EN</option>
+          </select>
+          <a href="/platform/" style="display:inline-flex;align-items:center;padding:9px 12px;border:1px solid var(--line);border-radius:999px;color:var(--text);text-decoration:none;font-weight:800;font-size:12px">Platform demo</a>
+          <a href="/client.html" style="display:inline-flex;align-items:center;padding:9px 12px;border:1px solid var(--line);border-radius:999px;color:var(--text);text-decoration:none;font-weight:800;font-size:12px">Client MVP</a>
+          <a href="/admin.html" style="display:inline-flex;align-items:center;padding:9px 12px;border:1px solid var(--line);border-radius:999px;color:var(--text);text-decoration:none;font-weight:800;font-size:12px">Admin</a>
+          <button class="ghost" data-screen="call">Посмотреть демо</button>
+        </header>
+
+        <section class="content">
+          <div class="mobile-tabs" id="mobileNav">
+            <button class="active" data-screen="dashboard">Главная</button>
+            <button data-screen="owner">Руководитель</button>
+            <button data-screen="call">Звонок</button>
+            <button data-screen="heatmap">Навыки</button>
+            <button data-screen="coaching">Коучинг</button>
+            <button data-screen="report">Отчет</button>
+            <button data-screen="checklists">Чек-листы</button>
+            <button data-screen="integrations">Интеграции</button>
+            <button data-screen="admin">Админка</button>
+            <button data-screen="roadmap">Roadmap</button>
+            <button data-screen="usecases">Use Cases</button>
+            <button data-screen="sample">Sample</button>
+            <button data-screen="implementation">Внедрение</button>
+            <button data-screen="pricing">Планы</button>
+            <button data-screen="faq">FAQ</button>
+            <button data-screen="lead">Заявка</button>
+            <a href="/platform/" style="display:inline-flex;align-items:center;justify-content:center;padding:9px 12px;border:1px solid var(--line);border-radius:999px;color:var(--text);text-decoration:none;font-weight:800;font-size:12px">Platform demo</a>
+            <a href="/client.html" style="display:inline-flex;align-items:center;justify-content:center;padding:9px 12px;border:1px solid var(--line);border-radius:999px;color:var(--text);text-decoration:none;font-weight:800;font-size:12px">Client MVP</a>
+          </div>
+
+          <div class="screen active" id="screen-dashboard">
+            <div class="section-head">
+              <div>
+                <h1>AI-аудит звонков для продаж, поддержки и клиент-сервиса</h1>
+                <p>CallControl AI показывает, где в диалогах теряются деньги, клиенты и качество сервиса: от риск-звонков до чек-листов, коучинга и недельного отчета.</p>
+              </div>
+              <button class="primary" data-jump="lead">Получить бесплатный mini-audit</button>
+            </div>
+
+            <div class="hero-panel">
+              <div class="card hero-copy">
+                <span class="chip blue">для владельцев, РОПов и руководителей сервиса</span>
+                <h2 class="mt">Найдите звонки, где менеджеры теряют заявки, до того как деньги уйдут конкурентам.</h2>
+                <p>Вы загружаете 3-5 звонков или транскриптов. AI проверяет диалоги по чек-листу, находит критические ошибки и показывает, что исправить в скрипте уже завтра.</p>
+                <div class="proof-grid">
+                  <div class="proof-tile"><strong>Не просто текст</strong><span>а причина потери лида и действие</span></div>
+                  <div class="proof-tile"><strong>Не ручная прослушка</strong><span>а проверка всей выборки звонков</span></div>
+                  <div class="proof-tile"><strong>Не “когда-нибудь”</strong><span>а отчет, который можно обсудить на планерке</span></div>
+                </div>
+                <div class="hero-actions">
+                  <button class="primary" data-jump="lead">Получить бесплатный mini-audit</button>
+                  <button class="ghost" data-screen="call">Посмотреть демо</button>
+                </div>
+              </div>
+
+              <div class="card quick-audit">
+                <h2>Как выглядит первый результат</h2>
+                <div class="step">
+                  <div class="step-num">1</div>
+                  <div><strong>Вы даете звонки</strong><p>До 5 звонков, до 15 минут каждый, ссылкой или текстом.</p></div>
+                </div>
+                <div class="step">
+                  <div class="step-num">2</div>
+                  <div><strong>AI ищет фатальные ошибки</strong><p>Цена без ценности, нет бюджета, нет следующего шага, токсичный тон.</p></div>
+                </div>
+                <div class="step">
+                  <div class="step-num">3</div>
+                  <div><strong>Вы получаете one-page отчет</strong><p>Главный риск, цитата, оценка, action items и предложение полного аудита.</p></div>
+                </div>
+                <button class="ghost" data-screen="call">Посмотреть демо</button>
+              </div>
+            </div>
+
+            <div class="card mt">
+              <div class="section-head" style="margin-bottom:12px">
+                <div>
+                  <h2>Что вы получите после 3-5 звонков</h2>
+                  <p>Мини-аудит не заставляет читать простыню текста. Он сразу показывает, где потерялась заявка, какой момент это доказывает и что сделать на следующей планерке.</p>
+                </div>
+                <button class="primary" data-jump="lead">Получить бесплатный mini-audit</button>
+              </div>
+              <div class="audit-preview-grid">
+                <div class="audit-preview-item"><strong>Общий score</strong><p>Короткая оценка выборки: насколько звонки проходят базовый стандарт качества.</p></div>
+                <div class="audit-preview-item"><strong>Главный риск</strong><p>Самая дорогая ошибка: цена, бюджет, следующий шаг, тон или уход к конкуренту.</p></div>
+                <div class="audit-preview-item"><strong>2-3 цитаты</strong><p>Конкретные фразы из звонков, чтобы было видно доказательство, а не “мнение AI”.</p></div>
+                <div class="audit-preview-item"><strong>Action items</strong><p>Что исправить в скрипте, вопросах или финале разговора уже завтра.</p></div>
+                <div class="audit-preview-item"><strong>Рекомендация РОПу</strong><p>Кого обучать, какой навык просел и какой звонок взять как эталон.</p></div>
+                <div class="audit-preview-item"><strong>Следующий аудит</strong><p>Что проверить дальше: 20 звонков, отдел целиком, поддержку или отдельную нишу.</p></div>
+              </div>
+            </div>
+
+            <div class="compare-grid mt">
+              <div class="card red">
+                <h2>Обычный транскрипт</h2>
+                <ul class="compare-list negative">
+                  <li>Дает текст разговора, но не объясняет, где потерялась заявка.</li>
+                  <li>РОП все равно читает вручную и тратит время на поиск смысла.</li>
+                  <li>Не показывает приоритет: что чинить завтра, а что можно отложить.</li>
+                  <li>Не превращается в задачу для менеджера или план планерки.</li>
+                </ul>
+              </div>
+              <div class="card green">
+                <h2>CallControl AI</h2>
+                <ul class="compare-list positive">
+                  <li>Показывает риск, цитату, причину ошибки и конкретное действие.</li>
+                  <li>Собирает scorecard, чек-лист, coaching focus и вывод для РОПа.</li>
+                  <li>Подходит не только продажам, но и поддержке, сервису, колл-центрам.</li>
+                  <li>Помогает быстро решить: нужен полный аудит или гипотеза слабая.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="grid kpis mb">
+              <div class="card">
+                <div class="metric-label">AI-аудит выборки</div>
+                <div class="metric-value value">47</div>
+                <div class="metric-sub">из 52 звонков прошли проверку; 5 отброшены из-за качества записи</div>
+              </div>
+              <div class="card red">
+                <div class="metric-label">Риск-звонки</div>
+                <div class="metric-value risk">24</div>
+                <div class="metric-sub">Клиент мог уйти, а менеджер не заметил</div>
+              </div>
+              <div class="card red">
+                <div class="metric-label">Деньги под риском</div>
+                <div class="metric-value risk">$28,800</div>
+                <div class="metric-sub">Сумма сделок под угрозой из-за коммуникации</div>
+              </div>
+              <div class="card">
+                <div class="metric-label">Сэкономлено времени</div>
+                <div class="metric-value ok">5h</div>
+                <div class="metric-sub">Экономия времени РОПа на прослушке</div>
+              </div>
+            </div>
+
+            <div class="grid two">
+              <div class="card">
+                <h2>Рейтинг менеджеров</h2>
+                <table>
+                  <thead>
+                    <tr><th>Менеджер</th><th>Звонки</th><th>Оценка</th><th>Риск</th><th>Фокус</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td><div class="person"><div class="avatar">ИВ</div><div><strong>Иван</strong><span>эталонный звонок</span></div></div></td>
+                      <td>17</td><td class="ok">84</td><td><span class="chip green">низкий</span></td><td>делиться лучшими звонками</td>
+                    </tr>
+                    <tr>
+                      <td><div class="person"><div class="avatar">МА</div><div><strong>Мария</strong><span>стабильный контакт</span></div></div></td>
+                      <td>16</td><td class="warn">64</td><td><span class="chip yellow">средний</span></td><td>следующий шаг</td>
+                    </tr>
+                    <tr>
+                      <td><div class="person"><div class="avatar">ДМ</div><div><strong>Дмитрий</strong><span>требует коучинга</span></div></div></td>
+                      <td>17</td><td class="risk">43</td><td><span class="chip red">высокий</span></td><td>бюджет и цена</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div class="card">
+                <h2>Топ системных дыр</h2>
+                <div class="list">
+                  <div>
+                    <div class="split-row"><strong>Нет следующего шага</strong><span class="risk">45%</span></div>
+                    <div class="bar"><i style="width:45%; background: var(--red)"></i></div>
+                  </div>
+                  <div>
+                    <div class="split-row"><strong>Не уточнен бюджет</strong><span class="risk">38%</span></div>
+                    <div class="bar"><i style="width:38%; background: var(--red)"></i></div>
+                  </div>
+                  <div>
+                    <div class="split-row"><strong>Слабая отработка цены</strong><span class="warn">31%</span></div>
+                    <div class="bar"><i style="width:31%; background: var(--yellow)"></i></div>
+                  </div>
+                  <div>
+                    <div class="split-row"><strong>Менеджер говорит слишком много</strong><span class="warn">29%</span></div>
+                    <div class="bar"><i style="width:29%; background: var(--yellow)"></i></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid three mt">
+              <div class="card">
+                <h2>Что слышит РОП</h2>
+                <p>Обычно 2-5% звонков. Остальное остается в слепой зоне и всплывает только после потери сделки.</p>
+                <span class="chip blue">ручная выборка</span>
+              </div>
+              <div class="card">
+                <h2>Что нашел AI</h2>
+                <p>24 риск-звонка, 11 пропущенных следующих шагов, 7 слабых ответов на “дорого” и 5 звонков без бюджета.</p>
+                <span class="chip yellow">100% выборки</span>
+              </div>
+              <div class="card">
+                <h2>Что делать завтра</h2>
+                <p>Назначить коучинг Дмитрию, дать Марии скрипт закрытия на дату и взять звонок Ивана как эталон.</p>
+                <span class="chip green">план планерки</span>
+              </div>
+            </div>
+
+            <div class="card mt">
+              <div class="section-head" style="margin-bottom:12px">
+                <div>
+                  <h2>Что будет в полной версии</h2>
+                  <p>Показываем не обещания “когда-нибудь”, а понятную дорожную карту: что уже можно тестировать руками, что будет автоматизировано и какие модули появятся после первых клиентов.</p>
+                </div>
+                <span class="chip yellow">публичная бета</span>
+              </div>
+              <div class="wide-roadmap">
+                <div class="roadmap-item"><strong>Личный кабинет</strong><p>Владелец, РОП и менеджеры увидят разные уровни доступа: деньги, команда, личные задачи и отчеты.</p><div class="bar mt"><i style="width:45%;background:var(--yellow)"></i></div></div>
+                <div class="roadmap-item"><strong>Загрузка данных</strong><p>MP3, WAV, M4A, текстовые транскрипты, CSV и ссылки Drive/Dropbox. Лимиты зависят от пакета.</p><div class="bar mt"><i style="width:35%;background:var(--yellow)"></i></div></div>
+                <div class="roadmap-item"><strong>Телефония/API</strong><p>Binotel, Ringostat, CRM/webhook и кастомные API для автоматической передачи звонков без ручной загрузки.</p><div class="bar mt"><i style="width:20%;background:var(--red)"></i></div></div>
+                <div class="roadmap-item"><strong>CRM-заметки</strong><p>Боли клиента, обещания менеджера, следующий шаг, риск сделки и AI-score будут улетать в карточку лида.</p><div class="bar mt"><i style="width:30%;background:var(--yellow)"></i></div></div>
+                <div class="roadmap-item"><strong>Безопасность</strong><p>Роли, 2FA, audit log, лимиты free trial, self-hosted режим и контроль хранения записей.</p><div class="bar mt"><i style="width:25%;background:var(--red)"></i></div></div>
+              </div>
+            </div>
+
+            <div class="card mt">
+              <div class="section-head" style="margin-bottom:12px">
+                <div>
+                  <h2>Полная карта возможностей</h2>
+                  <p>Платформа собирает контроль звонков в одну систему: от поиска рисков и CRM-заметок до коучинга, отчетов и интеграций с телефонией.</p>
+                </div>
+                <span class="chip blue">демо покрытие: 90%</span>
+              </div>
+              <div class="feature-matrix">
+                <div class="feature-card"><strong>Dashboard руководителя</strong><p>Деньги под риском, рисковые звонки, рейтинг менеджеров, фокус недели и динамика команды.</p></div>
+                <div class="feature-card"><strong>AI Call Detail</strong><p>Транскрипт, риск, обещания клиенту, CRM-заметки, action items и возможность оспорить оценку.</p></div>
+                <div class="feature-card"><strong>Heatmap навыков</strong><p>Сравнение менеджеров по контакту, квалификации, ценности, возражениям и закрытию.</p></div>
+                <div class="feature-card"><strong>Manager Coaching</strong><p>Личный фокус дня, задачи, прогресс навыков и библиотека эталонных звонков.</p></div>
+                <div class="feature-card"><strong>Weekly PDF</strong><p>Executive summary, план планерки, системные слабости и список задач на неделю.</p></div>
+                <div class="feature-card"><strong>Чек-листы</strong><p>Продажи, поддержка, недвижимость, EdTech, авто, клиники, B2B и кастомные критерии.</p></div>
+                <div class="feature-card"><strong>Интеграции</strong><p>CSV, Google Drive, Binotel/Ringostat, CRM webhook, Telegram digest и API-ready слой.</p></div>
+                <div class="feature-card"><strong>Безопасность</strong><p>Роли, лимиты free trial, audit log, 2FA/SSO как enterprise roadmap и self-hosted режим.</p></div>
+              </div>
+            </div>
+
+            <div class="card mt">
+              <h2>Как проходит заявка: от клика до отчета</h2>
+              <div class="pipeline">
+                <div class="pipeline-step"><strong>01. Заявка</strong><p>Клиент оставляет контакт, нишу, боль и ссылку на звонки.</p></div>
+                <div class="pipeline-step"><strong>02. Проверка данных</strong><p>Система/оператор проверяет доступ, звук и лимит free audit.</p></div>
+                <div class="pipeline-step"><strong>03. AI-анализ</strong><p>Транскрипт проходит чек-лист, поиск рисков и scoring.</p></div>
+                <div class="pipeline-step"><strong>04. Quality Review</strong><p>Самый сильный риск проверяется глазами перед отправкой.</p></div>
+                <div class="pipeline-step"><strong>05. Отчет</strong><p>Клиент получает Telegram/PDF и предложение полного аудита.</p></div>
+              </div>
+            </div>
+
+            <div class="card mt">
+              <div class="split-row">
+                <div>
+                  <h2>Планы доступа</h2>
+                  <p>Быстрый старт без подписки: сначала бесплатный мини-аудит, потом платный разбор или внедрение постоянного контроля.</p>
+                </div>
+                <button class="ghost" data-screen="pricing">Открыть все планы</button>
+              </div>
+              <div class="grid three">
+                <div class="item"><strong>$0 · Mini Audit</strong><p>До 5 звонков, до 15 минут каждый.</p></div>
+                <div class="item yellow"><strong>$10 · Quick Scan</strong><p>Быстрая диагностика критических ошибок.</p></div>
+                <div class="item green"><strong>$299 · Department Audit</strong><p>До 100 звонков, Heatmap, PDF и план обучения.</p></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-owner">
+            <div class="section-head">
+              <div>
+                <h1>Кабинет руководителя: контроль отдела без ручной прослушки</h1>
+                <p>Экран показывает, как владелец или РОП видит распределение звонков, качество диалогов, риск потери денег и быстрые действия по команде.</p>
+              </div>
+              <span class="chip green">Owner View</span>
+            </div>
+            <div class="grid kpis mb">
+              <div class="card"><div class="metric-label">Упущено лидов</div><div class="metric-value risk">15</div><div class="metric-sub">звонков без следующего шага</div></div>
+              <div class="card"><div class="metric-label">Средняя оценка отдела</div><div class="metric-value warn">63</div><div class="metric-sub">цель недели: 75+</div></div>
+              <div class="card"><div class="metric-label">Можно вернуть</div><div class="metric-value ok">$11.2k</div><div class="metric-sub">через повторные касания</div></div>
+              <div class="card"><div class="metric-label">Risk window</div><div class="metric-value value">14-16</div><div class="metric-sub">пик слабых звонков</div></div>
+            </div>
+            <div class="grid two">
+              <div class="card">
+                <h2>Доля звонков и качество</h2>
+                <div class="list">
+                  <div><div class="split-row"><strong>Иван · 17 звонков · 84/100</strong><span class="ok">34%</span></div><div class="bar"><i style="width:34%;background:var(--green)"></i></div></div>
+                  <div><div class="split-row"><strong>Мария · 16 звонков · 64/100</strong><span class="warn">32%</span></div><div class="bar"><i style="width:32%;background:var(--yellow)"></i></div></div>
+                  <div><div class="split-row"><strong>Дмитрий · 17 звонков · 43/100</strong><span class="risk">34%</span></div><div class="bar"><i style="width:34%;background:var(--red)"></i></div></div>
+                </div>
+              </div>
+              <div class="card red">
+                <h2>ROI-калькулятор потерь</h2>
+                <div class="list">
+                  <div class="split-row"><strong>Средний чек</strong><span>$2,400</span></div>
+                  <div class="split-row"><strong>Риск-звонки</strong><span class="risk">24</span></div>
+                  <div class="split-row"><strong>Вероятность спасения</strong><span class="warn">20%</span></div>
+                  <div class="split-row"><strong>Потенциал возврата</strong><span class="ok">$11,520</span></div>
+                </div>
+                <p class="small mt">В SaaS это станет калькулятором с настройкой среднего чека и конверсии под клиента.</p>
+              </div>
+            </div>
+            <div class="grid three mt">
+              <div class="card blue"><h2>Telegram Digest</h2><p>Каждое утро владелец получает 5 строк: сколько звонков проверено, где риск, кого учить и какие сделки вернуть.</p></div>
+              <div class="card"><h2>Gold Calls Library</h2><p>Библиотека лучших звонков Ивана для обучения команды: цена, возражения, закрытие, эмпатия.</p></div>
+              <div class="card"><h2>Dispute AI Score</h2><p>Менеджер может оспорить оценку, если контекст был сложнее. Это снижает сопротивление команды.</p></div>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-call">
+            <div class="section-head">
+              <div>
+                <h1>Разбор звонка: где именно теряется заявка</h1>
+                <p>AI не просто ставит оценку. Он показывает цитату, причину риска и конкретную замену фразы для следующего звонка.</p>
+              </div>
+              <span class="chip red" id="callRiskBadge">Высокий риск · Звонок #4482</span>
+            </div>
+            <div class="grid two">
+              <div class="card">
+                <div class="split-row">
+                  <h2 style="margin:0">Выборка звонков</h2>
+                  <div class="segmented" id="riskFilter">
+                    <button class="active" type="button" data-filter="high">Высокий</button>
+                    <button type="button" data-filter="medium">Средний</button>
+                    <button type="button" data-filter="low">Низкий</button>
+                  </div>
+                </div>
+                <div class="call-picker mb" id="callPicker"></div>
+
+                <h2>Фрагмент транскрипта</h2>
+                <div class="transcript" id="callTranscript"></div>
+              </div>
+              <div class="grid">
+                <div class="card red">
+                  <h2>Сигнал риска</h2>
+                  <p id="riskText"><strong class="risk">Брошенный лид.</strong> Клиент проявил интерес, но звонок закончился фразой “подумайте” без даты следующего контакта.</p>
+                  <div class="mt" id="callTags"></div>
+                </div>
+                <div class="card blue">
+                  <h2>Что сделать менеджеру</h2>
+                  <p id="actionText">Заменить ответ на: “С чем сравниваете? Давайте я покажу, за что здесь доплата, и забронирую просмотр на субботу 11:00”.</p>
+                  <button class="ghost mt" id="ackTip">Назначить задачу РОПу</button>
+                  <p class="small mt" id="ackHint">В демо кнопка показывает будущую механику: совет превратится в задачу для менеджера или РОПа.</p>
+                </div>
+                <div class="card">
+                  <h2>Рекомендация РОПу</h2>
+                  <p id="ropText">Разобрать с Дмитрием блок “цена → ценность → следующий шаг” и дать 3 звонка на контроль.</p>
+                </div>
+                <div class="card">
+                  <h2>Что записать в CRM</h2>
+                  <div class="crm-grid">
+                    <div class="crm-note"><strong>Факты о клиенте</strong><p>Сравнивает с конкурентом, чувствителен к цене, хочет понятную рассрочку.</p></div>
+                    <div class="crm-note"><strong>Обещания менеджера</strong><p>Отправить варианты в WhatsApp, но дата следующего контакта не зафиксирована.</p></div>
+                    <div class="crm-note"><strong>Следующий шаг</strong><p>Назначить повторный звонок и показать расчет ценности объекта.</p></div>
+                    <div class="crm-note"><strong>CRM payload</strong><p>lead_risk=high, next_step_missing=true, objection=price, competitor=true.</p></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <h2>Командные действия</h2>
+                  <div class="list">
+                    <div class="item red"><strong>Задача Дмитрию</strong><p>3 следующих звонка начинать с бюджета и способа оплаты.</p></div>
+                    <div class="item yellow"><strong>Задача РОПу</strong><p>Проверить, появилась ли дата следующего шага в CRM.</p></div>
+                    <div class="item"><strong>Dispute</strong><p>Менеджер может оставить комментарий: “клиент просил только прайс”.</p></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-heatmap">
+            <div class="section-head">
+              <div>
+                <h1>Карта компетенций команды</h1>
+                <p>РОП видит не “кто плохой”, а какой этап воронки проседает у всей команды одновременно.</p>
+              </div>
+              <span class="chip red">Фокус недели: Закрытие</span>
+            </div>
+            <div class="card heat-wrap">
+              <div class="heatmap">
+                <div></div><div class="heat-head">Контакт</div><div class="heat-head">Квалификация</div><div class="heat-head">Ценность</div><div class="heat-head">Возражения</div><div class="heat-head">Закрытие</div>
+                <div class="heat-name">Иван</div><div class="heat-cell heat-green">92%</div><div class="heat-cell heat-green">84%</div><div class="heat-cell heat-green">88%</div><div class="heat-cell heat-yellow">68%</div><div class="heat-cell heat-green">91%</div>
+                <div class="heat-name">Мария</div><div class="heat-cell heat-green">80%</div><div class="heat-cell heat-yellow">62%</div><div class="heat-cell heat-yellow">70%</div><div class="heat-cell heat-yellow">58%</div><div class="heat-cell heat-red">34%</div>
+                <div class="heat-name">Дмитрий</div><div class="heat-cell heat-yellow">55%</div><div class="heat-cell heat-red">28%</div><div class="heat-cell heat-yellow">48%</div><div class="heat-cell heat-red">24%</div><div class="heat-cell heat-red">18%</div>
+              </div>
+            </div>
+            <div class="grid three mt">
+              <div class="card red"><h2>Системная дыра</h2><p>Закрытие проседает у 2 из 3 менеджеров. 45% звонков заканчиваются без даты следующего контакта.</p></div>
+              <div class="card"><h2>Лидер роста</h2><p>Иван вырос на 15% после внедрения техники “следующий шаг”. Его звонок можно использовать как эталонный пример.</p></div>
+              <div class="card blue"><h2>Действие РОПа</h2><p>Назначить всей команде задачу: 10 звонков подряд закрывать на конкретное время и канал связи.</p></div>
+            </div>
+            <div class="card mt">
+              <h2>Индивидуальные рекомендации</h2>
+              <div class="manager-recs">
+                <div class="manager-rec">
+                  <div class="person"><div class="avatar">МА</div><div><strong>Мария</strong><span>оценка 64/100</span></div></div>
+                  <p>Контакт и презентация сильные, но закрытие проседает: 34% по блоку “следующий шаг”.</p>
+                  <span class="chip yellow">тренировать календарь</span>
+                </div>
+                <div class="manager-rec">
+                  <div class="person"><div class="avatar">ДМ</div><div><strong>Дмитрий</strong><span>оценка 43/100</span></div></div>
+                  <p>Главная проблема — квалификация 28% и закрытие 18%. Продает объект до понимания бюджета.</p>
+                  <span class="chip red">контроль 3 звонков</span>
+                </div>
+                <div class="manager-rec">
+                  <div class="person"><div class="avatar">ИВ</div><div><strong>Иван</strong><span>оценка 84/100</span></div></div>
+                  <p>Сильная зона — закрытие 91%. Можно использовать как ментора для Марии и эталонный звонок для команды.</p>
+                  <span class="chip green">ментор команды</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-checklists">
+            <div class="section-head">
+              <div>
+                <h1>Чек-листы проверки звонков</h1>
+                <p>Так выглядит будущая настройка AI-аудитора: руководитель выбирает сценарий, включает критерии и сохраняет правила проверки под свою нишу.</p>
+              </div>
+              <button class="primary" id="saveChecklist" type="button">Сохранить настройки</button>
+            </div>
+            <div class="grid two">
+              <div class="card">
+                <h2>Основные сценарии</h2>
+                <div class="settings-list" id="activeScenarios">
+                  <details class="settings-card" open>
+                    <summary>Универсальный чек-лист качества <span class="chip blue">20 критериев</span></summary>
+                    <div class="criteria">
+                      <label><input type="checkbox" checked /> Приветствие</label>
+                      <label><input type="checkbox" checked /> Дружелюбный тон</label>
+                      <label><input type="checkbox" checked /> Цель звонка</label>
+                      <label><input type="checkbox" checked /> Уточняющие вопросы</label>
+                      <label><input type="checkbox" checked /> Активное слушание</label>
+                      <label><input type="checkbox" checked /> Отсутствие перебиваний</label>
+                      <label><input type="checkbox" checked /> Отсутствие мата</label>
+                      <label><input type="checkbox" checked /> Отсутствие токсичных фраз</label>
+                      <label><input type="checkbox" checked /> Выявление боли</label>
+                      <label><input type="checkbox" checked /> Уточнение контекста</label>
+                      <label><input type="checkbox" checked /> Проверка понимания</label>
+                      <label><input type="checkbox" checked /> Ценность перед ценой</label>
+                      <label><input type="checkbox" checked /> Работа с возражениями</label>
+                      <label><input type="checkbox" checked /> Конкретный следующий шаг</label>
+                      <label><input type="checkbox" checked /> Фиксация даты/времени</label>
+                      <label><input type="checkbox" /> Обещания клиенту</label>
+                      <label><input type="checkbox" /> Риск ухода к конкуренту</label>
+                      <label><input type="checkbox" /> Слишком длинный монолог</label>
+                      <label><input type="checkbox" /> Скорость речи</label>
+                      <label><input type="checkbox" /> Эскалация сложного случая</label>
+                    </div>
+                  </details>
+                </div>
+              </div>
+              <div class="card">
+                <h2>Нишевые пресеты</h2>
+                <div class="settings-list" id="presetScenarios">
+                  <details class="settings-card scenario-card" data-scenario="sales" open>
+                    <summary>Отдел продаж <span class="chip blue">15 критериев</span></summary>
+                    <div class="criteria">
+                      <label><input type="checkbox" checked /> Приветствие и цель звонка</label>
+                      <label><input type="checkbox" checked /> Квалификация потребности</label>
+                      <label><input type="checkbox" checked /> Бюджет и способ оплаты</label>
+                      <label><input type="checkbox" checked /> Презентация ценности</label>
+                      <label><input type="checkbox" checked /> Отработка “дорого”</label>
+                      <label><input type="checkbox" checked /> Следующий шаг с датой</label>
+                      <label><input type="checkbox" /> ЛПР</label>
+                      <label><input type="checkbox" /> Конкурент</label>
+                      <label><input type="checkbox" /> Срок покупки</label>
+                      <label><input type="checkbox" /> Повторный контакт</label>
+                    </div>
+                    <button class="ghost mt scenario-toggle" type="button">Добавить в сценарий</button>
+                  </details>
+                  <details class="settings-card scenario-card" data-scenario="service">
+                    <summary>Клиент-сервис <span class="chip yellow">12 критериев</span></summary>
+                    <div class="criteria">
+                      <label><input type="checkbox" checked /> Тон и эмпатия</label>
+                      <label><input type="checkbox" checked /> Скорость реакции</label>
+                      <label><input type="checkbox" checked /> Понимание жалобы</label>
+                      <label><input type="checkbox" checked /> Эскалация сложного случая</label>
+                      <label><input type="checkbox" /> Контроль решения</label>
+                      <label><input type="checkbox" /> Извинение за проблему</label>
+                      <label><input type="checkbox" /> Срок ответа</label>
+                      <label><input type="checkbox" /> Повторное обращение</label>
+                    </div>
+                    <button class="ghost mt scenario-toggle" type="button">Добавить в сценарий</button>
+                  </details>
+                  <details class="settings-card scenario-card" data-scenario="real-estate">
+                    <summary>Недвижимость <span class="chip green">10 критериев</span></summary>
+                    <div class="criteria">
+                      <label><input type="checkbox" checked /> Бюджет покупки</label>
+                      <label><input type="checkbox" checked /> Район и инфраструктура</label>
+                      <label><input type="checkbox" checked /> Способ оплаты</label>
+                      <label><input type="checkbox" checked /> Запись на просмотр</label>
+                      <label><input type="checkbox" /> Причина переезда</label>
+                      <label><input type="checkbox" /> Срок сделки</label>
+                      <label><input type="checkbox" /> Альтернативы</label>
+                      <label><input type="checkbox" /> Бронь объекта</label>
+                    </div>
+                    <button class="ghost mt scenario-toggle" type="button">Добавить в сценарий</button>
+                  </details>
+                  <details class="settings-card scenario-card" data-scenario="edtech" open>
+                    <summary>EdTech <span class="chip blue">7 критериев</span></summary>
+                    <div class="criteria">
+                      <label><input type="checkbox" checked /> Цель обучения</label>
+                      <label><input type="checkbox" checked /> Срочность старта</label>
+                      <label><input type="checkbox" checked /> Бюджет</label>
+                      <label><input type="checkbox" checked /> Диагностический урок</label>
+                      <label><input type="checkbox" /> Мотивация ученика</label>
+                      <label><input type="checkbox" /> Возражение родителей</label>
+                      <label><input type="checkbox" /> Формат обучения</label>
+                    </div>
+                    <button class="ghost mt scenario-toggle" type="button">Добавить в сценарий</button>
+                  </details>
+                  <details class="settings-card scenario-card" data-scenario="auto">
+                    <summary>Автодилеры <span class="chip yellow">8 критериев</span></summary>
+                    <div class="criteria">
+                      <label><input type="checkbox" checked /> Трейд-ин</label>
+                      <label><input type="checkbox" checked /> Кредит/лизинг</label>
+                      <label><input type="checkbox" checked /> Тест-драйв</label>
+                      <label><input type="checkbox" /> Комплектация</label>
+                      <label><input type="checkbox" /> Наличие авто</label>
+                      <label><input type="checkbox" /> Срок покупки</label>
+                      <label><input type="checkbox" /> Запись в салон</label>
+                    </div>
+                    <button class="ghost mt scenario-toggle" type="button">Добавить в сценарий</button>
+                  </details>
+                  <details class="settings-card scenario-card" data-scenario="clinic">
+                    <summary>Клиники <span class="chip green">8 критериев</span></summary>
+                    <div class="criteria">
+                      <label><input type="checkbox" checked /> Симптомы</label>
+                      <label><input type="checkbox" checked /> Срочность</label>
+                      <label><input type="checkbox" checked /> Доверие к врачу</label>
+                      <label><input type="checkbox" /> Запись на прием</label>
+                      <label><input type="checkbox" /> Противопоказания</label>
+                      <label><input type="checkbox" /> Страх стоимости</label>
+                      <label><input type="checkbox" /> Напоминание</label>
+                    </div>
+                    <button class="ghost mt scenario-toggle" type="button">Добавить в сценарий</button>
+                  </details>
+                  <details class="settings-card scenario-card" data-scenario="b2b">
+                    <summary>B2B услуги <span class="chip blue">9 критериев</span></summary>
+                    <div class="criteria">
+                      <label><input type="checkbox" checked /> Боль бизнеса</label>
+                      <label><input type="checkbox" checked /> ЛПР</label>
+                      <label><input type="checkbox" checked /> ROI</label>
+                      <label><input type="checkbox" /> Следующий созвон</label>
+                      <label><input type="checkbox" /> Бюджет проекта</label>
+                      <label><input type="checkbox" /> Срок запуска</label>
+                      <label><input type="checkbox" /> Отправка КП</label>
+                    </div>
+                    <button class="ghost mt scenario-toggle" type="button">Добавить в сценарий</button>
+                  </details>
+                </div>
+                <p class="small mt">В реальной SaaS-версии эти правила будут влиять на AI-оценку, Heatmap и Weekly Report.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-coaching">
+            <div class="section-head">
+              <div>
+                <h1>Коучинг: не надзор, а карта роста</h1>
+                <p>Менеджер видит личный фокус дня и конкретные советы, а руководитель понимает, кто реально применяет рекомендации.</p>
+              </div>
+              <select class="language-select" id="coachingScope" aria-label="Выбор команды или менеджера">
+                <option value="team">Команда</option>
+                <option value="maria">Мария</option>
+                <option value="dmitry">Дмитрий</option>
+                <option value="ivan">Иван</option>
+              </select>
+            </div>
+            <div class="grid three">
+              <div class="card blue">
+                <h2 id="coachFocusTitle">Фокус дня</h2>
+                <p id="coachFocus"><strong>Команда: фиксировать следующий шаг.</strong> Каждый звонок должен завершаться датой, временем и каналом следующего контакта.</p>
+                <div class="mt"><span class="chip blue" id="coachTag">Закрытие</span></div>
+              </div>
+              <div class="card">
+                <h2>Прогресс навыков</h2>
+                <div class="list">
+                  <div><div class="split-row"><strong>Контакт</strong><span class="ok" id="skillContactText">80%</span></div><div class="bar"><i id="skillContact" style="width:80%; background: var(--green)"></i></div></div>
+                  <div><div class="split-row"><strong>Возражения</strong><span class="warn" id="skillObjectionText">58%</span></div><div class="bar"><i id="skillObjection" style="width:58%; background: var(--yellow)"></i></div></div>
+                  <div><div class="split-row"><strong>Закрытие</strong><span class="risk" id="skillCloseText">34%</span></div><div class="bar"><i id="skillClose" style="width:34%; background: var(--red)"></i></div></div>
+                </div>
+              </div>
+              <div class="card">
+                <h2>Задачи</h2>
+                <div class="list" id="coachTasks"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-report">
+            <div class="section-head">
+              <div>
+                <h1>Недельный отчет по качеству продаж</h1>
+                <p>Готовый сценарий планерки: общий пульс, деньги под риском, слабые места, рост менеджеров и задачи на неделю.</p>
+              </div>
+              <button class="ghost" onclick="window.print()">Сохранить как PDF</button>
+            </div>
+            <div class="grid two">
+              <div class="card red">
+                <h2>Executive Summary</h2>
+                <p><strong>Общая оценка отдела: 63/100.</strong> Главный риск недели — отсутствие фиксации следующего шага. AI проверил 50 звонков и сэкономил РОПу около 5 часов ручной прослушки.</p>
+                <p><strong class="risk">Деньги под риском: $28,800.</strong> Это зона внимания, а не обещание потерь. Ошибки устранимы через коррекцию скрипта и коучинг.</p>
+              </div>
+              <div class="card">
+                <h2>Пульс отдела</h2>
+                <div class="list">
+                  <div class="split-row"><strong>Проверено звонков</strong><span class="value">47/52</span></div>
+                  <div class="split-row"><strong>Риск-звонки</strong><span class="risk">24</span></div>
+                  <div class="split-row"><strong>Средний балл</strong><span class="warn">63/100</span></div>
+                  <div class="split-row"><strong>Сэкономлено времени РОПа</strong><span class="ok">5 часов</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="grid two mt">
+              <div class="card">
+                <h2>План на понедельник</h2>
+                <div class="list">
+                  <div class="item red"><strong>Разбор 3 звонков Дмитрия</strong><p>Тема: бюджет, цена, следующий шаг.</p></div>
+                  <div class="item yellow"><strong>Воркшоп “Дорого”</strong><p>3 варианта ответа через ценность.</p></div>
+                  <div class="item green"><strong>Эталонный звонок Ивана</strong><p>Показать команде как закрывать на просмотр.</p></div>
+                </div>
+              </div>
+              <div class="card blue">
+                <h2>Главный инсайт недели</h2>
+                <p>Команда хорошо устанавливает контакт, но теряет сделки в моменте перехода от презентации к договоренности. Это не проблема мотивации, а проблема ритуала: финал звонка не закреплен в скрипте.</p>
+                <p><strong>Фокус следующей недели:</strong> закрытие на дату, время и канал связи в каждом диалоге.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-integrations">
+            <div class="section-head">
+              <div>
+                <h1>Интеграции и загрузка данных</h1>
+                <p>Демо показывает не только ручную форму, но и будущий путь к автоматическому контролю звонков из телефонии, CRM и файловых выгрузок.</p>
+              </div>
+              <span class="chip blue">API-ready roadmap</span>
+            </div>
+            <div class="feature-matrix">
+              <details class="feature-card integration-card" open><summary><div class="feature-icon">⇧</div><strong>Manual Upload</strong><p>MP3/WAV/M4A · TXT · Drive</p></summary><p class="mt">Для MVP: ручная загрузка аудио, транскриптов или ссылок. Подходит для первых mini-audit и платных разборов без интеграции телефонии.</p></details>
+              <details class="feature-card integration-card"><summary><div class="feature-icon">CSV</div><strong>CSV Import</strong><p>Сотрудники · звонки · сделки</p></summary><p class="mt">Импорт сотрудников, звонков, статусов сделок и среднего чека для расчета Value at Risk и рейтинга менеджеров.</p></details>
+              <details class="feature-card integration-card"><summary><div class="feature-icon">☎</div><strong>Telephony API</strong><p>Binotel · Ringostat · webhook</p></summary><p class="mt">Автоматическая передача звонков из телефонии без ручной загрузки. Подключается после появления paid client.</p></details>
+              <details class="feature-card integration-card"><summary><div class="feature-icon">CRM</div><strong>CRM Notes</strong><p>Риск · обещания · next step</p></summary><p class="mt">Передача обещаний, боли клиента, риска, следующего шага и AI-score обратно в карточку клиента.</p></details>
+              <details class="feature-card integration-card"><summary><div class="feature-icon">✈</div><strong>Telegram Digest</strong><p>Утренние сводки владельцу</p></summary><p class="mt">Каждое утро: риски, лиды на возврат, кого обучать и что проверить сегодня. Работает через безопасный backend/webhook.</p></details>
+              <details class="feature-card integration-card"><summary><div class="feature-icon">PDF</div><strong>PDF Export</strong><p>Weekly Report · mini-audit</p></summary><p class="mt">Физический deliverable: отчет для планерки, клиента или платного аудита с executive summary и action plan.</p></details>
+              <details class="feature-card integration-card"><summary><div class="feature-icon">AI</div><strong>OpenAI / Local LLM</strong><p>Cloud API · self-hosted</p></summary><p class="mt">Сначала облачный AI API, позже self-hosted/enterprise контур для клиентов с жесткими требованиями безопасности.</p></details>
+              <details class="feature-card integration-card"><summary><div class="feature-icon">⧖</div><strong>Queue</strong><p>Free slow · paid priority</p></summary><p class="mt">Очередь анализа: бесплатные заявки обрабатываются медленнее, платные аудиты получают приоритет.</p></details>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-admin">
+            <div class="section-head">
+              <div>
+                <h1>Админка, роли и безопасность</h1>
+                <p>Этот экран показывает будущую основу SaaS: кто что видит, как ограничивается free trial, как защищаются данные и как управлять заявками.</p>
+              </div>
+              <span class="chip yellow">MVP → SaaS</span>
+            </div>
+            <div class="security-grid">
+              <div class="card"><h2>Роли</h2><p><strong>Владелец:</strong> деньги и отчеты. <strong>РОП:</strong> команда и коучинг. <strong>Менеджер:</strong> личные задачи. <strong>Админ:</strong> настройки и доступы.</p></div>
+              <div class="card"><h2>Free Trial Control</h2><p>Один домен компании = один бесплатный лимит. До 5 звонков, до 15 минут каждый, без доступа к полному кабинету.</p></div>
+              <div class="card"><h2>Security Roadmap</h2><p>2FA, audit log, управление сессиями, ограничение API-ключей, удаление записей и self-hosted режим для sensitive-клиентов.</p></div>
+            </div>
+            <div class="card mt">
+              <h2>CRM заявок Mini-Audit</h2>
+              <div class="pipeline">
+                <div class="pipeline-step"><strong>01. New</strong><p>Заявка пришла с сайта.</p></div>
+                <div class="pipeline-step"><strong>02. Data Check</strong><p>Проверка ссылок и качества данных.</p></div>
+                <div class="pipeline-step"><strong>03. Analyzing</strong><p>AI делает скоринг и выводы.</p></div>
+                <div class="pipeline-step"><strong>04. Review</strong><p>Ручная проверка главного риска.</p></div>
+                <div class="pipeline-step"><strong>05. Sent</strong><p>Отчет отправлен, включен follow-up.</p></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-roadmap">
+            <div class="section-head">
+              <div>
+                <h1>Roadmap продукта</h1>
+                <p>Показываем тестовой группе, что уже можно пробовать, что будет следующим и куда развивается платформа.</p>
+              </div>
+              <span class="chip green">публичная бета</span>
+            </div>
+            <div class="roadmap">
+              <div class="roadmap-item"><div class="split-row"><strong>Демо-витрина</strong><span class="chip green">82%</span></div><p>Dashboard, Call Detail, Heatmap, Coaching, Weekly Report, Checklists, Lead Form.</p><div class="bar mt"><i style="width:82%;background:var(--green)"></i></div></div>
+              <div class="roadmap-item"><div class="split-row"><strong>Telegram Digest</strong><span class="chip yellow">15%</span></div><p>Форма, webhook, уведомления, утренние сводки владельцу и статусы заявок.</p><div class="bar mt"><i style="width:15%;background:var(--red)"></i></div></div>
+              <div class="roadmap-item"><div class="split-row"><strong>SaaS MVP</strong><span class="chip yellow">38%</span></div><p>Авторизация, загрузка файлов, база звонков, админка заявок, история отчетов.</p><div class="bar mt"><i style="width:38%;background:var(--yellow)"></i></div></div>
+              <div class="roadmap-item"><div class="split-row"><strong>Автоматизация</strong><span class="chip blue">22%</span></div><p>Интеграция телефонии, очереди анализа, CRM webhook и регулярные отчеты.</p><div class="bar mt"><i style="width:22%;background:var(--red)"></i></div></div>
+              <div class="roadmap-item"><div class="split-row"><strong>Командные кабинеты</strong><span class="chip blue">28%</span></div><p>Роли, менеджерские задачи, dispute score, gold calls library и права доступа.</p><div class="bar mt"><i style="width:28%;background:var(--red)"></i></div></div>
+              <div class="roadmap-item"><div class="split-row"><strong>Enterprise</strong><span class="chip red">10%</span></div><p>Self-hosted, audit log, 2FA/SSO, локальные модели, isolated deployment.</p><div class="bar mt"><i style="width:10%;background:var(--red)"></i></div></div>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-usecases">
+            <div class="section-head">
+              <div>
+                <h1>Use cases: где CallControl AI приносит пользу</h1>
+                <p>Один движок анализа, разные чек-листы: продажи, поддержка, недвижимость, EdTech, клиники, автодилеры и B2B услуги.</p>
+              </div>
+              <button class="primary" data-jump="lead">Проверить свою нишу</button>
+            </div>
+            <div class="feature-matrix">
+              <div class="feature-card"><div class="feature-icon">₴</div><strong>Отдел продаж</strong><p>Боль: лиды оплачены рекламой, но сливаются в звонках. AI проверяет бюджет, ценность, возражения, следующий шаг и риск ухода к конкуренту.</p></div>
+              <div class="feature-card"><div class="feature-icon">☎</div><strong>Клиент-сервис</strong><p>Боль: клиент злится, а руководитель узнает поздно. AI отслеживает тон, эмпатию, эскалацию, токсичные фразы и повторные обращения.</p></div>
+              <div class="feature-card"><div class="feature-icon">⌂</div><strong>Недвижимость</strong><p>Боль: менеджер рассказывает объект, не понимая бюджет и сроки. AI проверяет район, способ оплаты, запись на просмотр и бронь.</p></div>
+              <div class="feature-card"><div class="feature-icon">ED</div><strong>EdTech</strong><p>Боль: родители/клиенты “подумают” и пропадают. AI ищет цель обучения, мотивацию, срочность старта и закрытие на диагностический урок.</p></div>
+              <div class="feature-card"><div class="feature-icon">CAR</div><strong>Автодилеры</strong><p>Боль: клиент сравнивает комплектации и уходит без тест-драйва. AI проверяет trade-in, кредит/лизинг, наличие авто и запись в салон.</p></div>
+              <div class="feature-card"><div class="feature-icon">MD</div><strong>Клиники</strong><p>Боль: администратор теряет доверие до записи. AI проверяет симптомы, срочность, тон, страх стоимости и запись на прием.</p></div>
+              <div class="feature-card"><div class="feature-icon">B2B</div><strong>B2B услуги</strong><p>Боль: длинные разговоры без ЛПР, бюджета и следующего созвона. AI ищет pain, ROI, сроки запуска и реальный decision process.</p></div>
+              <div class="feature-card"><div class="feature-icon">QA</div><strong>Внутренний контроль</strong><p>Боль: стандарты есть в документе, но не в разговорах. AI показывает playbook drift: где команда перестала соблюдать процесс.</p></div>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-sample">
+            <div class="section-head">
+              <div>
+                <h1>Sample Report: пример результата после мини-аудита</h1>
+                <p>Такой отчет можно отправить клиенту после первых 5 звонков: коротко, доказательно, с цитатой и понятным следующим шагом.</p>
+              </div>
+              <button class="ghost" data-jump="lead">Хочу такой отчет</button>
+            </div>
+            <div class="report-hero">
+              <div class="card red">
+                <h2>AI Score отдела</h2>
+                <div class="score-circle">42</div>
+                <p>Главная проблема: менеджеры хорошо начинают диалог, но не фиксируют следующий шаг. В 3 из 5 звонков лид ушел в “подумаю”.</p>
+              </div>
+              <div class="card">
+                <h2>Executive Summary</h2>
+                <div class="list">
+                  <div class="item red"><strong>Ouch Moment</strong><p>Клиент сказал “в целом нравится”, но менеджер не предложил встречу, оплату или конкретный follow-up.</p></div>
+                  <div class="item yellow"><strong>Цитата-доказательство</strong><p>“Ну, вы подумайте, если что — напишите.”</p></div>
+                  <div class="item green"><strong>Что исправить завтра</strong><p>В финале каждого звонка давать выбор: “суббота 11:00 или воскресенье 14:00?”</p></div>
+                </div>
+              </div>
+            </div>
+            <div class="grid three mt">
+              <div class="card"><h2>Money Leak</h2><p><strong class="risk">$4,800 под риском.</strong> Если средний чек $2,400, два горячих лида без следующего шага уже стоят дороже мини-аудита.</p></div>
+              <div class="card"><h2>Top Errors</h2><p>Нет следующего шага: 3/5. Цена до ценности: 2/5. Бюджет не уточнен: 2/5. Менеджер говорит больше клиента: 2/5.</p></div>
+              <div class="card"><h2>Upsell Logic</h2><p>В 5 звонках нашли повторяющуюся ошибку. Следующий шаг — 20-50 звонков, чтобы понять, это случайность или системная болезнь отдела.</p></div>
+            </div>
+            <div class="card mt">
+              <h2>Action Plan для РОПа</h2>
+              <div class="pipeline">
+                <div class="pipeline-step"><strong>01. Убрать стоп-фразу</strong><p>Запретить “подумайте” без даты следующего контакта.</p></div>
+                <div class="pipeline-step"><strong>02. Добавить скрипт</strong><p>Цена → ценность → выбор времени следующего действия.</p></div>
+                <div class="pipeline-step"><strong>03. Проверить CRM</strong><p>Каждый follow-up должен иметь дату, время и канал.</p></div>
+                <div class="pipeline-step"><strong>04. Взять эталон</strong><p>Звонок Ивана сохранить как gold call для команды.</p></div>
+                <div class="pipeline-step"><strong>05. Повторный аудит</strong><p>Через неделю проверить, снизился ли risk rate.</p></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-implementation">
+            <div class="section-head">
+              <div>
+                <h1>Как внедряется: от ручного аудита до SaaS</h1>
+                <p>Путь без тяжелого старта: сначала доказываем ценность на файлах, потом подключаем регулярные отчеты, CRM, телефонию и роли.</p>
+              </div>
+              <span class="chip blue">MVP → Automation → SaaS</span>
+            </div>
+            <div class="pipeline">
+              <div class="pipeline-step"><strong>01. Mini Audit</strong><p>5 звонков, один отчет, один сильный инсайт и решение, есть ли смысл идти дальше.</p></div>
+              <div class="pipeline-step"><strong>02. Pattern Search</strong><p>20-50 звонков: ищем системные ошибки, рейтинг менеджеров и повторяющиеся фразы.</p></div>
+              <div class="pipeline-step"><strong>03. Чек-лист</strong><p>Настраиваем критерии под нишу: продажи, поддержка, недвижимость, EdTech или B2B.</p></div>
+              <div class="pipeline-step"><strong>04. Регулярный отчет</strong><p>Weekly Report: кого учить, какие звонки переслушать и где деньги под риском.</p></div>
+              <div class="pipeline-step"><strong>05. Интеграции</strong><p>CRM notes, Telegram digest, телефония/API, роли и приоритетная очередь анализа.</p></div>
+            </div>
+            <div class="grid three mt">
+              <div class="card blue"><h2>Manual-first</h2><p>Не нужно ждать идеальную SaaS. Первую пользу можно показать через ручную загрузку и one-page отчет.</p></div>
+              <div class="card"><h2>Data loop</h2><p>Каждый аудит улучшает чек-листы, промпты, критерии и понимание ниши. Это ускоряет будущую SaaS-версию.</p></div>
+              <div class="card green"><h2>Automation-ready</h2><p>Когда появится спрос, тот же процесс переносится в backend: upload, queue, AI scoring, PDF, Telegram, CRM.</p></div>
+            </div>
+            <div class="card mt">
+              <h2>Что важно подключать не сразу</h2>
+              <div class="grid three">
+                <div class="item"><strong>Платежи</strong><p>На старте можно принимать заявки и продавать аудит вручную.</p></div>
+                <div class="item"><strong>Телефония</strong><p>Подключать после первого paid client, чтобы не утонуть в API до проверки спроса.</p></div>
+                <div class="item"><strong>Менеджерские кабинеты</strong><p>Нужны, когда руководитель уже понял ценность отчета и хочет масштабировать.</p></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-pricing">
+            <div class="section-head">
+              <div>
+                <h1>Начать можно с малого теста</h1>
+                <p>Не продаем транскрибацию. Продаем ответ: где в звонках теряются заявки и что исправить завтра.</p>
+              </div>
+              <button class="primary" data-jump="lead">Получить бесплатный mini-audit</button>
+            </div>
+            <div class="grid pricing">
+              <div class="card price-card">
+                <h2>Бесплатный тест</h2>
+                <div class="price">$0</div>
+                <p>До 5 звонков, до 15 минут каждый. Один ключевой риск и один конкретный совет.</p>
+                <ul><li>ручной отбор</li><li>1 компания = 1 заявка</li></ul>
+              </div>
+              <div class="card price-card featured">
+                <h2>Быстрый разбор</h2>
+                <div class="price">$10</div>
+                <p>До 5 звонков, до 15 минут каждый. Ищем критические ошибки и одну главную дыру.</p>
+                <ul><li>оценка звонков</li><li>критические ошибки</li><li>1 совет отделу</li></ul>
+              </div>
+              <div class="card price-card">
+                <h2>Мини-аудит команды</h2>
+                <div class="price">$50</div>
+                <p>Для небольшой выборки отдела: до 20 коротких звонков или до 120 минут суммарно.</p>
+                <ul><li>поиск паттернов</li><li>рейтинг менеджеров</li><li>one-page отчет</li></ul>
+              </div>
+              <div class="card price-card">
+                <h2>Индивидуальный аудит / внедрение</h2>
+                <div class="price">custom</div>
+                <p>Подбираем объем по звонкам и минутам, настраиваем чек-лист, отчетность и формат внедрения под ваш процесс.</p>
+                <ul><li>любой объем</li><li>кастомные критерии</li><li>self-hosted при потребности</li></ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-faq">
+            <div class="section-head">
+              <div>
+                <h1>FAQ: что это, как работает и зачем бизнесу</h1>
+                <p>Короткие ответы на вопросы, которые обычно появляются до заявки: про данные, цену, безопасность, отличие от транскрибации и реальную пользу.</p>
+              </div>
+              <button class="primary" data-jump="lead">Оставить заявку</button>
+            </div>
+            <div class="faq-list">
+              <details class="faq-item" open><summary>Чем это отличается от обычной транскрибации?</summary><p>Транскрибация дает текст. CallControl AI дает управленческий ответ: где потеряли клиента, какая фраза сломала диалог и что поменять в скрипте.</p></details>
+              <details class="faq-item"><summary>Кому это полезно в первую очередь?</summary><p>Владельцам, РОПам, руководителям клиент-сервиса и командам, где есть входящие/исходящие звонки и качество общения влияет на деньги.</p></details>
+              <details class="faq-item"><summary>Что нужно для бесплатного мини-аудита?</summary><p>До 5 звонков или транскриптов, желательно до 15 минут каждый, плюс короткий контекст: ниша, отдел, главная боль и что именно проверить.</p></details>
+              <details class="faq-item"><summary>Можно ли отправить не аудио, а текст?</summary><p>Да. Для старта текстовые транскрипты даже удобнее: быстрее проверить гипотезу и дешевле обработать первые заявки.</p></details>
+              <details class="faq-item"><summary>Что будет в отчете?</summary><p>Оценка выборки, главный риск, цитата из звонка, причина ошибки, action items для менеджера/РОПа и рекомендация, какой аудит делать дальше.</p></details>
+              <details class="faq-item"><summary>Вы заменяете РОПа?</summary><p>Нет. Система убирает рутину прослушки и подсвечивает, куда РОПу смотреть. Решения, обучение и внедрение все равно остаются за руководителем.</p></details>
+              <details class="faq-item"><summary>Можно ли анализировать поддержку, а не продажи?</summary><p>Да. Для поддержки меняется чек-лист: тон, эмпатия, скорость реакции, эскалация, решение обращения, токсичные фразы и повторные обращения.</p></details>
+              <details class="faq-item"><summary>Как защищаются записи?</summary><p>В демо-режиме данные используются только для подготовки отчета. В SaaS-плане предусмотрены роли, лимиты доступа, audit log, удаление записей и self-hosted режим.</p></details>
+              <details class="faq-item"><summary>Почему бесплатный аудит ограничен?</summary><p>AI-анализ стоит денег и времени на проверку качества. Поэтому free audit ограничен одной компанией и небольшой выборкой, чтобы дать честный первый инсайт.</p></details>
+              <details class="faq-item"><summary>Сколько стоит следующий шаг?</summary><p>Можно начать с быстрого разбора за $10, мини-аудита команды за $50 или индивидуального формата, если звонков много или нужны особые чек-листы.</p></details>
+              <details class="faq-item"><summary>Можно ли подключить телефонию?</summary><p>Да, это запланированный путь: Binotel, Ringostat, CRM/webhook или кастомный API. На старте быстрее проверить ценность через ручную загрузку.</p></details>
+              <details class="faq-item"><summary>Что будет считаться хорошим результатом теста?</summary><p>Если в 5 звонках находится повторяющаяся ошибка, которую можно исправить завтра, значит есть смысл проверять 20-50 звонков и искать системный паттерн.</p></details>
+              <details class="faq-item"><summary>Можно ли увидеть доказательство, а не просто оценку?</summary><p>Да. Каждая оценка должна ссылаться на конкретную цитату или момент звонка: это Evidence View, без него руководитель не поверит скорингу.</p></details>
+              <details class="faq-item"><summary>Какие метрики будут в SaaS?</summary><p>AI scorecards, talk/listen ratio, sentiment, topic trackers, next step rate, competitor mentions, objection handling, risk rate и coaching progress.</p></details>
+              <details class="faq-item"><summary>Можно ли искать по всем звонкам?</summary><p>В MVP это важный модуль: “покажи все звонки, где клиент сказал дорого, упомянул конкурента, просил скидку или угрожал уйти”.</p></details>
+              <details class="faq-item"><summary>Что будет для менеджеров?</summary><p>Не “доска позора”, а личная карта роста: сильные стороны, зона недели, правильная фраза, gold calls и возможность оспорить AI-score.</p></details>
+              <details class="faq-item"><summary>Что будет для владельца?</summary><p>Risk Command Center: деньги под риском, худшие звонки недели, кто просел, какие лиды можно вернуть и что обсудить на планерке.</p></details>
+              <details class="faq-item"><summary>Можно ли построить свой чек-лист?</summary><p>Да. Идеальный сценарий: руководитель обычным языком описывает правило, а система превращает его в AI-check для будущих звонков.</p></details>
+            </div>
+          </div>
+
+          <div class="screen" id="screen-lead">
+            <div class="section-head">
+              <div>
+                <h1>Получить бесплатный AI-аудит звонков</h1>
+                <p>Заполните заявку. Сейчас это закрытая бета: мы вручную проверяем данные и отправляем короткий отчет в Telegram или WhatsApp.</p>
+              </div>
+              <span class="chip yellow">до 5 звонков · до 15 мин каждый</span>
+            </div>
+            <div class="grid two">
+              <div class="card">
+                <h2>Заявка на мини-аудит</h2>
+                <form class="lead-form" id="leadForm">
+                  <label>Имя<input name="name" required placeholder="Как к вам обращаться" /></label>
+                  <label>Роль<select name="role" required><option>Владелец</option><option>РОП</option><option>Маркетолог</option><option>Другое</option></select></label>
+                  <label>Telegram / WhatsApp<input name="contact" required placeholder="@username или номер" /></label>
+                  <label>Компания<input name="company" required placeholder="Название компании" /></label>
+                  <label>Сайт<input name="site" required placeholder="https://..." /></label>
+                  <label>Размер отдела<select name="team" required><option>1-2</option><option>3-10</option><option>10-30</option><option>30+</option></select></label>
+                  <label>Ниша<select name="niche" required><option>Продажи</option><option>Клиент-сервис</option><option>Недвижимость</option><option>EdTech</option><option>Авто</option><option>Другое</option></select></label>
+                  <label>Формат данных<select name="dataFormat" required><option>Аудио-файлы</option><option>Транскрипты</option><option>Ссылка на папку</option><option>CSV / экспорт</option></select></label>
+                  <label class="full">Главная боль<textarea name="pain" placeholder="Например: менеджеры сливают цену, не закрывают на следующий шаг, не перезванивают"></textarea></label>
+                  <label class="full">Ссылка на звонки или транскрипты<textarea name="data" required placeholder="Google Drive / Dropbox / текст транскрипта. До 5 звонков, до 15 минут каждый."></textarea></label>
+                  <p class="small full">Записи используются только для аудита. Не передаем третьим лицам и не используем для обучения публичных моделей.</p>
+                  <div class="full" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <button class="primary" type="submit">Отправить заявку</button>
+                    <button class="ghost" type="button" id="copyBrief">Скопировать ТЗ для Tally</button>
+                    <span class="small">После подключения Tally эта кнопка будет вести в настоящую форму.</span>
+                  </div>
+                </form>
+              </div>
+              <div class="grid">
+                <div class="card blue">
+                  <h2>Что вы получите</h2>
+                  <div class="list">
+                    <div class="item"><strong>Оценка по звонкам</strong><p>Понимание, насколько разговоры соответствуют целевому сценарию.</p></div>
+                    <div class="item"><strong>Главная болезненная ошибка</strong><p>Одна критичная находка с цитатой из звонка.</p></div>
+                    <div class="item"><strong>Конкретное действие</strong><p>Что поменять в скрипте или поведении менеджера уже завтра.</p></div>
+                  </div>
+                </div>
+                <div class="card">
+                  <h2>Ограничение free audit</h2>
+                  <p>Бесплатно разбираем до 5 звонков, до 15 минут каждый. Один отчет на одну компанию. Если данные не открываются или звук нечитаемый, попросим заменить файл.</p>
+                  <p class="small">Для быстрого старта лучше отправлять текстовые транскрипты. Аудио тоже можно, но первые аудиты проходят ручную проверку.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast">
+      <strong>Заявка сохранена в демо-режиме.</strong>
+      <p>Для реального сбора лидов нужно заменить демо-отправку на Tally/Google Form или подключить ваш Telegram-бот.</p>
+    </div>
+
+    <script>
+      const titles = {
+        dashboard: "Главная",
+        owner: "Кабинет руководителя",
+        call: "Разбор звонка",
+        heatmap: "Карта навыков",
+        coaching: "Коучинг",
+        report: "Недельный отчет",
+        checklists: "Чек-листы",
+        integrations: "Интеграции",
+        admin: "Админка",
+        roadmap: "Roadmap",
+        usecases: "Use Cases",
+        sample: "Sample Report",
+        implementation: "Внедрение",
+        pricing: "Планы",
+        faq: "FAQ",
+        lead: "Заявка"
+      };
+
+      const titleTranslations = {
+        ru: titles,
+        uk: {
+          dashboard: "Головна",
+          owner: "Кабінет керівника",
+          call: "Розбір дзвінка",
+          heatmap: "Карта навичок",
+          coaching: "Коучинг",
+          report: "Тижневий звіт",
+          checklists: "Чек-листи",
+          integrations: "Інтеграції",
+          admin: "Адмінка",
+          roadmap: "Roadmap",
+          usecases: "Use Cases",
+          sample: "Sample Report",
+          implementation: "Впровадження",
+          pricing: "Плани",
+          faq: "FAQ",
+          lead: "Заявка"
+        },
+        en: {
+          dashboard: "Home",
+          owner: "Owner Dashboard",
+          call: "Call Review",
+          heatmap: "Skill Map",
+          coaching: "Coaching",
+          report: "Weekly Report",
+          checklists: "Checklists",
+          integrations: "Integrations",
+          admin: "Admin",
+          roadmap: "Roadmap",
+          usecases: "Use Cases",
+          sample: "Sample Report",
+          implementation: "Implementation",
+          pricing: "Plans",
+          faq: "FAQ",
+          lead: "Lead Form"
+        }
+      };
+
+      let currentLanguage = "ru";
+      let currentScreen = "dashboard";
+
+      const textTranslations = {
+        uk: {
+          "AI-РОП Radar": "CallControl AI",
+          "Контроль звонков": "Контроль дзвінків",
+          "Демо-комната": "Демо-кімната",
+          "Сводка": "Зведення",
+          "Разбор звонка": "Розбір дзвінка",
+          "Карта навыков": "Карта навичок",
+          "Коучинг": "Коучинг",
+          "Недельный отчет": "Тижневий звіт",
+          "Чек-листы": "Чек-листи",
+          "Запуск": "Запуск",
+          "Офферы": "Офери",
+          "Заявка": "Заявка",
+          "Получить аудит 5 звонков": "Отримати аудит 5 дзвінків",
+          "1 компания · до 5 звонков · до 15 мин каждый": "1 компанія · до 5 дзвінків · до 15 хв кожен",
+          "Демо-режим": "Демо-режим",
+          "Недвижимость · 50 звонков": "Нерухомість · 50 дзвінків",
+          "Готово для показа": "Готово до показу",
+          "Получить аудит": "Отримати аудит",
+          "AI проверил 50 звонков и нашел 24 риска потери клиента": "AI перевірив 50 дзвінків і знайшов 24 ризики втрати клієнта",
+          "Демо показывает, как руководитель видит слепые зоны отдела продаж: деньги под риском, слабые места менеджеров и план действий на планерку.": "Демо показує, як керівник бачить сліпі зони відділу продажів: гроші під ризиком, слабкі місця менеджерів і план дій на планірку.",
+          "Проверено звонков": "Перевірено дзвінків",
+          "AI прошел всю выборку, не 2-5% вручную": "AI перевірив усю вибірку, а не 2-5% вручну",
+          "Риск-звонки": "Ризикові дзвінки",
+          "Клиент мог уйти, а менеджер не заметил": "Клієнт міг піти, а менеджер не помітив",
+          "Деньги под риском": "Гроші під ризиком",
+          "Сумма сделок под угрозой из-за коммуникации": "Сума угод під загрозою через комунікацію",
+          "Сэкономлено времени": "Зекономлено часу",
+          "Экономия времени РОПа на прослушке": "Економія часу РОПа на прослуховуванні",
+          "Рейтинг менеджеров": "Рейтинг менеджерів",
+          "Менеджер": "Менеджер",
+          "Звонки": "Дзвінки",
+          "Оценка": "Оцінка",
+          "Риск": "Ризик",
+          "Фокус": "Фокус",
+          "Топ системных дыр": "Топ системних прогалин",
+          "Нет следующего шага": "Немає наступного кроку",
+          "Не уточнен бюджет": "Не уточнено бюджет",
+          "Слабая отработка цены": "Слабке опрацювання ціни",
+          "Менеджер говорит слишком много": "Менеджер говорить занадто багато",
+          "Что слышит РОП": "Що чує РОП",
+          "Что нашел AI": "Що знайшов AI",
+          "Что делать завтра": "Що робити завтра",
+          "Разбор звонка: где именно теряется заявка": "Розбір дзвінка: де саме втрачається заявка",
+          "Выборка звонков": "Вибірка дзвінків",
+          "Высокий": "Високий",
+          "Средний": "Середній",
+          "Низкий": "Низький",
+          "Фрагмент транскрипта": "Фрагмент транскрипту",
+          "Сигнал риска": "Сигнал ризику",
+          "Что сделать менеджеру": "Що зробити менеджеру",
+          "Назначить задачу РОПу": "Призначити задачу РОПу",
+          "Рекомендация РОПу": "Рекомендація РОПу",
+          "Карта компетенций команды": "Карта компетенцій команди",
+          "Фокус недели: Закрытие": "Фокус тижня: Закриття",
+          "Индивидуальные рекомендации": "Індивідуальні рекомендації",
+          "Чек-листы проверки звонков": "Чек-листи перевірки дзвінків",
+          "Сохранить настройки": "Зберегти налаштування",
+          "Основные сценарии": "Основні сценарії",
+          "Общий контроль продаж": "Загальний контроль продажів",
+          "Клиент-сервис": "Клієнт-сервіс",
+          "Недвижимость": "Нерухомість",
+          "Нишевые пресеты": "Нішеві пресети",
+          "Недельный отчет по качеству продаж": "Тижневий звіт з якості продажів",
+          "Сохранить как PDF": "Зберегти як PDF",
+          "Пульс отдела": "Пульс відділу",
+          "План на понедельник": "План на понеділок",
+          "Главный инсайт недели": "Головний інсайт тижня",
+          "Начать можно с малого теста": "Почати можна з малого тесту",
+          "Бесплатный тест": "Безкоштовний тест",
+          "Быстрый разбор": "Швидкий розбір",
+          "Поиск паттернов": "Пошук патернів",
+          "Аудит отдела": "Аудит відділу",
+          "Внедрение под ключ": "Впровадження під ключ",
+          "Получить бесплатный AI-аудит звонков": "Отримати безкоштовний AI-аудит дзвінків",
+          "Заявка на мини-аудит": "Заявка на міні-аудит",
+          "Имя": "Ім'я",
+          "Роль": "Роль",
+          "Компания": "Компанія",
+          "Сайт": "Сайт",
+          "Размер отдела": "Розмір відділу",
+          "Главная боль": "Головний біль",
+          "Ссылка на звонки или транскрипты": "Посилання на дзвінки або транскрипти",
+          "Отправить заявку": "Надіслати заявку",
+          "Что вы получите": "Що ви отримаєте",
+          "Ограничение free audit": "Обмеження free audit"
+        },
+        en: {
+          "AI-РОП Radar": "CallControl AI",
+          "Контроль звонков": "Call quality control",
+          "Демо-комната": "Demo room",
+          "Сводка": "Overview",
+          "Разбор звонка": "Call review",
+          "Карта навыков": "Skill map",
+          "Коучинг": "Coaching",
+          "Недельный отчет": "Weekly report",
+          "Чек-листы": "Checklists",
+          "Запуск": "Launch",
+          "Офферы": "Offers",
+          "Заявка": "Lead form",
+          "Получить аудит 5 звонков": "Get 5-call audit",
+          "1 компания · до 5 звонков · до 15 мин каждый": "1 company · up to 5 calls · 15 min each",
+          "Демо-режим": "Demo mode",
+          "Недвижимость · 50 звонков": "Real estate · 50 calls",
+          "Готово для показа": "Ready to show",
+          "Получить аудит": "Get audit",
+          "AI проверил 50 звонков и нашел 24 риска потери клиента": "AI reviewed 50 calls and found 24 client-loss risks",
+          "Демо показывает, как руководитель видит слепые зоны отдела продаж: деньги под риском, слабые места менеджеров и план действий на планерку.": "The demo shows how a sales leader sees blind spots: money at risk, weak manager skills, and an action plan for the next team meeting.",
+          "Проверено звонков": "Calls reviewed",
+          "AI прошел всю выборку, не 2-5% вручную": "AI checked the full sample, not 2-5% manually",
+          "Риск-звонки": "Risk calls",
+          "Клиент мог уйти, а менеджер не заметил": "The client could leave while the manager missed the signal",
+          "Деньги под риском": "Revenue at risk",
+          "Сумма сделок под угрозой из-за коммуникации": "Pipeline value threatened by communication mistakes",
+          "Сэкономлено времени": "Time saved",
+          "Экономия времени РОПа на прослушке": "Sales lead time saved on call review",
+          "Рейтинг менеджеров": "Manager ranking",
+          "Менеджер": "Manager",
+          "Звонки": "Calls",
+          "Оценка": "Score",
+          "Риск": "Risk",
+          "Фокус": "Focus",
+          "Топ системных дыр": "Top systemic gaps",
+          "Нет следующего шага": "No next step",
+          "Не уточнен бюджет": "Budget not qualified",
+          "Слабая отработка цены": "Weak price handling",
+          "Менеджер говорит слишком много": "Manager talks too much",
+          "Что слышит РОП": "What the sales lead hears",
+          "Что нашел AI": "What AI found",
+          "Что делать завтра": "What to do tomorrow",
+          "Разбор звонка: где именно теряется заявка": "Call review: where the lead is lost",
+          "Выборка звонков": "Call sample",
+          "Высокий": "High",
+          "Средний": "Medium",
+          "Низкий": "Low",
+          "Фрагмент транскрипта": "Transcript fragment",
+          "Сигнал риска": "Risk signal",
+          "Что сделать менеджеру": "What the manager should do",
+          "Назначить задачу РОПу": "Assign task to sales lead",
+          "Рекомендация РОПу": "Sales lead recommendation",
+          "Карта компетенций команды": "Team skill map",
+          "Фокус недели: Закрытие": "Weekly focus: Closing",
+          "Индивидуальные рекомендации": "Individual recommendations",
+          "Чек-листы проверки звонков": "Call review checklists",
+          "Сохранить настройки": "Save settings",
+          "Основные сценарии": "Core scenarios",
+          "Общий контроль продаж": "General sales QA",
+          "Клиент-сервис": "Customer service",
+          "Недвижимость": "Real estate",
+          "Нишевые пресеты": "Industry presets",
+          "Недельный отчет по качеству продаж": "Weekly sales quality report",
+          "Сохранить как PDF": "Save as PDF",
+          "Пульс отдела": "Team pulse",
+          "План на понедельник": "Monday action plan",
+          "Главный инсайт недели": "Main weekly insight",
+          "Начать можно с малого теста": "Start with a small test",
+          "Бесплатный тест": "Free test",
+          "Быстрый разбор": "Quick scan",
+          "Поиск паттернов": "Pattern search",
+          "Аудит отдела": "Department audit",
+          "Внедрение под ключ": "Assisted setup",
+          "Получить бесплатный AI-аудит звонков": "Get a free AI call audit",
+          "Заявка на мини-аудит": "Mini-audit request",
+          "Имя": "Name",
+          "Роль": "Role",
+          "Компания": "Company",
+          "Сайт": "Website",
+          "Размер отдела": "Team size",
+          "Главная боль": "Main pain",
+          "Ссылка на звонки или транскрипты": "Call link or transcripts",
+          "Отправить заявку": "Submit request",
+          "Что вы получите": "What you get",
+          "Ограничение free audit": "Free audit limit"
+        }
+      };
+
+      const textNodeBase = new WeakMap();
+
+      Object.assign(textTranslations.uk, {
+        "CallControl AI": "CallControl AI",
+        "Аналитика звонков": "Аналітика дзвінків",
+        "Главная": "Головна",
+        "Планы": "Плани",
+        "AI-аудит звонков для продаж, поддержки и клиент-сервиса": "AI-аудит дзвінків для продажів, підтримки та клієнт-сервісу",
+        "CallControl AI показывает, где в диалогах теряются деньги, клиенты и качество сервиса: от риск-звонков до чек-листов, коучинга и недельного отчета.": "CallControl AI показує, де в діалогах втрачаються гроші, клієнти та якість сервісу: від ризикових дзвінків до чек-листів, коучингу і тижневого звіту.",
+        "Что уже можно показать": "Що вже можна показати",
+        "Dashboard руководителя": "Dashboard керівника",
+        "Риски, деньги под угрозой, рейтинг менеджеров и слепые зоны.": "Ризики, гроші під загрозою, рейтинг менеджерів і сліпі зони.",
+        "Разбор звонка": "Розбір дзвінка",
+        "Цитата, причина риска, рекомендация менеджеру и действие РОПа.": "Цитата, причина ризику, рекомендація менеджеру і дія РОПа.",
+        "Weekly Report": "Weekly Report",
+        "Готовая структура отчета для планерки и PDF-экспорта.": "Готова структура звіту для планірки і PDF-експорту.",
+        "Что в разработке": "Що в розробці",
+        "SaaS-кабинет": "SaaS-кабінет",
+        "Загрузка аудио": "Завантаження аудіо",
+        "Телефония/API": "Телефонія/API",
+        "Роли и доступы": "Ролі та доступи",
+        "Для кого подходит": "Для кого підходить",
+        "Продажи": "Продажі",
+        "Контроль скриптов, квалификации, возражений и закрытия на следующий шаг.": "Контроль скриптів, кваліфікації, заперечень і закриття на наступний крок.",
+        "Поддержка": "Підтримка",
+        "Контроль тона, эскалаций, токсичных фраз и качества решения обращений.": "Контроль тону, ескалацій, токсичних фраз і якості вирішення звернень.",
+        "Сервисные команды": "Сервісні команди",
+        "Единые стандарты общения и быстрый поиск проблемных диалогов.": "Єдині стандарти спілкування і швидкий пошук проблемних діалогів.",
+        "Планы доступа": "Плани доступу",
+        "Быстрый старт без подписки: сначала бесплатный мини-аудит, потом платный разбор или внедрение постоянного контроля.": "Швидкий старт без підписки: спочатку безкоштовний міні-аудит, потім платний розбір або впровадження постійного контролю.",
+        "Открыть все планы": "Відкрити всі плани",
+        "До 5 звонков, до 15 минут каждый.": "До 5 дзвінків, до 15 хвилин кожен.",
+        "Быстрая диагностика критических ошибок.": "Швидка діагностика критичних помилок.",
+        "До 100 звонков, Heatmap, PDF и план обучения.": "До 100 дзвінків, Heatmap, PDF і план навчання.",
+        "Не продаем транскрибацию. Продаем ответ: где в звонках теряются заявки и что исправить завтра.": "Ми не продаємо транскрибацію. Ми продаємо відповідь: де в дзвінках губляться заявки і що виправити завтра.",
+        "До 5 звонков, до 15 минут каждый. Один ключевой риск и один конкретный совет.": "До 5 дзвінків, до 15 хвилин кожен. Один ключовий ризик і одна конкретна порада.",
+        "ручной отбор": "ручний відбір",
+        "1 компания = 1 заявка": "1 компанія = 1 заявка",
+        "До 5 звонков, до 15 минут каждый. Ищем критические ошибки и одну главную дыру.": "До 5 дзвінків, до 15 хвилин кожен. Шукаємо критичні помилки і одну головну прогалину.",
+        "оценка звонков": "оцінка дзвінків",
+        "критические ошибки": "критичні помилки",
+        "1 совет отделу": "1 порада відділу",
+        "До 20 звонков, до 15 минут каждый. Проверяем, случайность это или системная болезнь отдела.": "До 20 дзвінків, до 15 хвилин кожен. Перевіряємо, це випадковість чи системна хвороба відділу.",
+        "топ ошибок": "топ помилок",
+        "фокус менеджеров": "фокус менеджерів",
+        "мини-отчет": "міні-звіт",
+        "До 100 звонков, до 15 минут каждый. Heatmap, рейтинг менеджеров, PDF и план обучения.": "До 100 дзвінків, до 15 хвилин кожен. Heatmap, рейтинг менеджерів, PDF і план навчання.",
+        "полный отчет": "повний звіт",
+        "деньги под риском": "гроші під ризиком",
+        "разбор": "розбір",
+        "Настройка постоянной системы контроля под вашу нишу и процессы.": "Налаштування постійної системи контролю під вашу нішу і процеси.",
+        "свой чек-лист": "свій чек-лист",
+        "дашборд": "дашборд",
+        "обучение РОПа": "навчання РОПа",
+        "Заполните заявку. Сейчас это закрытая бета: мы вручную проверяем данные и отправляем короткий отчет в Telegram или WhatsApp.": "Заповніть заявку. Зараз це закрита бета: ми вручну перевіряємо дані та надсилаємо короткий звіт у Telegram або WhatsApp.",
+        "до 5 звонков · до 15 мин каждый": "до 5 дзвінків · до 15 хв кожен",
+        "Оценка по звонкам": "Оцінка за дзвінками",
+        "Понимание, насколько разговоры соответствуют целевому сценарию.": "Розуміння, наскільки розмови відповідають цільовому сценарію.",
+        "Главная болезненная ошибка": "Головна болюча помилка",
+        "Одна критичная находка с цитатой из звонка.": "Одна критична знахідка з цитатою з дзвінка.",
+        "Конкретное действие": "Конкретна дія",
+        "Что поменять в скрипте или поведении менеджера уже завтра.": "Що змінити у скрипті або поведінці менеджера вже завтра.",
+        "Бесплатно разбираем до 5 звонков, до 15 минут каждый. Один отчет на одну компанию. Если данные не открываются или звук нечитаемый, попросим заменить файл.": "Безкоштовно розбираємо до 5 дзвінків, до 15 хвилин кожен. Один звіт на одну компанію. Якщо дані не відкриваються або звук нерозбірливий, попросимо замінити файл.",
+        "Для быстрого старта лучше отправлять текстовые транскрипты. Аудио тоже можно, но первые аудиты проходят ручную проверку.": "Для швидкого старту краще надсилати текстові транскрипти. Аудіо теж можна, але перші аудити проходять ручну перевірку."
+      });
+
+      Object.assign(textTranslations.en, {
+        "CallControl AI": "CallControl AI",
+        "Аналитика звонков": "Call analytics",
+        "Главная": "Home",
+        "Планы": "Plans",
+        "AI-аудит звонков для продаж, поддержки и клиент-сервиса": "AI call audit for sales, support, and customer service",
+        "CallControl AI показывает, где в диалогах теряются деньги, клиенты и качество сервиса: от риск-звонков до чек-листов, коучинга и недельного отчета.": "CallControl AI shows where calls lose revenue, clients, and service quality: from risk calls to checklists, coaching, and weekly reports.",
+        "Что уже можно показать": "What is ready to show",
+        "Dashboard руководителя": "Leadership dashboard",
+        "Риски, деньги под угрозой, рейтинг менеджеров и слепые зоны.": "Risks, revenue at risk, manager ranking, and blind spots.",
+        "Разбор звонка": "Call review",
+        "Цитата, причина риска, рекомендация менеджеру и действие РОПа.": "Quote, risk reason, manager recommendation, and sales lead action.",
+        "Weekly Report": "Weekly Report",
+        "Готовая структура отчета для планерки и PDF-экспорта.": "Ready report structure for team meetings and PDF export.",
+        "Что в разработке": "In development",
+        "SaaS-кабинет": "SaaS workspace",
+        "Загрузка аудио": "Audio upload",
+        "Телефония/API": "Telephony/API",
+        "Роли и доступы": "Roles and access",
+        "Для кого подходит": "Who it fits",
+        "Продажи": "Sales",
+        "Контроль скриптов, квалификации, возражений и закрытия на следующий шаг.": "Script, qualification, objection, and next-step control.",
+        "Поддержка": "Support",
+        "Контроль тона, эскалаций, токсичных фраз и качества решения обращений.": "Tone, escalation, toxic phrase, and resolution quality control.",
+        "Сервисные команды": "Service teams",
+        "Единые стандарты общения и быстрый поиск проблемных диалогов.": "Unified communication standards and fast discovery of problematic conversations.",
+        "Планы доступа": "Access plans",
+        "Быстрый старт без подписки: сначала бесплатный мини-аудит, потом платный разбор или внедрение постоянного контроля.": "Start without a subscription: first a free mini-audit, then a paid scan or continuous QA setup.",
+        "Открыть все планы": "Open all plans",
+        "До 5 звонков, до 15 минут каждый.": "Up to 5 calls, 15 minutes each.",
+        "Быстрая диагностика критических ошибок.": "Fast scan for critical mistakes.",
+        "До 100 звонков, Heatmap, PDF и план обучения.": "Up to 100 calls, heatmap, PDF, and coaching plan.",
+        "Не продаем транскрибацию. Продаем ответ: где в звонках теряются заявки и что исправить завтра.": "We do not sell transcription. We sell the answer: where calls lose leads and what to fix tomorrow.",
+        "До 5 звонков, до 15 минут каждый. Один ключевой риск и один конкретный совет.": "Up to 5 calls, 15 minutes each. One key risk and one concrete recommendation.",
+        "ручной отбор": "manual review",
+        "1 компания = 1 заявка": "1 company = 1 request",
+        "До 5 звонков, до 15 минут каждый. Ищем критические ошибки и одну главную дыру.": "Up to 5 calls, 15 minutes each. We find critical errors and one main gap.",
+        "оценка звонков": "call scoring",
+        "критические ошибки": "critical errors",
+        "1 совет отделу": "1 team recommendation",
+        "До 20 звонков, до 15 минут каждый. Проверяем, случайность это или системная болезнь отдела.": "Up to 20 calls, 15 minutes each. We check if it is a one-off or a systemic team pattern.",
+        "топ ошибок": "top mistakes",
+        "фокус менеджеров": "manager focus",
+        "мини-отчет": "mini report",
+        "До 100 звонков, до 15 минут каждый. Heatmap, рейтинг менеджеров, PDF и план обучения.": "Up to 100 calls, 15 minutes each. Heatmap, manager ranking, PDF, and coaching plan.",
+        "полный отчет": "full report",
+        "деньги под риском": "revenue at risk",
+        "разбор": "review",
+        "Настройка постоянной системы контроля под вашу нишу и процессы.": "Continuous QA setup tailored to your industry and workflow.",
+        "свой чек-лист": "custom checklist",
+        "дашборд": "dashboard",
+        "обучение РОПа": "sales lead training",
+        "Заполните заявку. Сейчас это закрытая бета: мы вручную проверяем данные и отправляем короткий отчет в Telegram или WhatsApp.": "Submit a request. This is a closed beta: we manually verify the data and send a short report via Telegram or WhatsApp.",
+        "до 5 звонков · до 15 мин каждый": "up to 5 calls · 15 min each",
+        "Оценка по звонкам": "Call score",
+        "Понимание, насколько разговоры соответствуют целевому сценарию.": "Understand how closely conversations match your target scenario.",
+        "Главная болезненная ошибка": "Main painful mistake",
+        "Одна критичная находка с цитатой из звонка.": "One critical finding with a quote from the call.",
+        "Конкретное действие": "Concrete action",
+        "Что поменять в скрипте или поведении менеджера уже завтра.": "What to change in the script or manager behavior tomorrow.",
+        "Бесплатно разбираем до 5 звонков, до 15 минут каждый. Один отчет на одну компанию. Если данные не открываются или звук нечитаемый, попросим заменить файл.": "We review up to 5 calls for free, 15 minutes each. One report per company. If data cannot be opened or audio is unreadable, we will ask for a replacement.",
+        "Для быстрого старта лучше отправлять текстовые транскрипты. Аудио тоже можно, но первые аудиты проходят ручную проверку.": "For a faster start, send text transcripts. Audio is also fine, but first audits go through manual QA."
+      });
+
+      Object.assign(textTranslations.uk, {
+        "Интеграции": "Інтеграції",
+        "Админка": "Адмінка",
+        "Руководитель": "Керівник",
+        "Навыки": "Навички",
+        "Отчет": "Звіт",
+        "AI-аудит выборки": "AI-аудит вибірки",
+        "из 52 звонков прошли проверку; 5 отброшены из-за качества записи": "із 52 дзвінків пройшли перевірку; 5 відхилені через якість запису",
+        "Что будет в полной версии": "Що буде у повній версії",
+        "Показываем не обещания “когда-нибудь”, а понятную дорожную карту: что уже можно тестировать руками, что будет автоматизировано и какие модули появятся после первых клиентов.": "Показуємо не обіцянки “колись”, а зрозумілу дорожню карту: що вже можна тестувати вручну, що буде автоматизовано і які модулі з'являться після перших клієнтів.",
+        "Полная карта возможностей": "Повна карта можливостей",
+        "Платформа собирает контроль звонков в одну систему: от поиска рисков и CRM-заметок до коучинга, отчетов и интеграций с телефонией.": "Платформа збирає контроль дзвінків в одну систему: від пошуку ризиків і CRM-нотаток до коучингу, звітів та інтеграцій з телефонією.",
+        "Интеграции и загрузка данных": "Інтеграції та завантаження даних",
+        "Демо показывает не только ручную форму, но и будущий путь к автоматическому контролю звонков из телефонии, CRM и файловых выгрузок.": "Демо показує не лише ручну форму, а й майбутній шлях до автоматичного контролю дзвінків з телефонії, CRM та файлових вивантажень.",
+        "Админка, роли и безопасность": "Адмінка, ролі та безпека",
+        "Этот экран показывает будущую основу SaaS: кто что видит, как ограничивается free trial, как защищаются данные и как управлять заявками.": "Цей екран показує майбутню основу SaaS: хто що бачить, як обмежується free trial, як захищаються дані та як керувати заявками.",
+        "Roadmap продукта": "Roadmap продукту",
+        "Показываем тестовой группе, что уже можно пробовать, что будет следующим и куда развивается платформа.": "Показуємо тестовій групі, що вже можна пробувати, що буде далі і куди розвивається платформа.",
+        "Мини-аудит команды": "Міні-аудит команди",
+        "Для небольшой выборки отдела: до 20 коротких звонков или до 120 минут суммарно.": "Для невеликої вибірки відділу: до 20 коротких дзвінків або до 120 хвилин сумарно.",
+        "Индивидуальный аудит / внедрение": "Індивідуальний аудит / впровадження",
+        "Подбираем объем по звонкам и минутам, настраиваем чек-лист, отчетность и формат внедрения под ваш процесс.": "Підбираємо обсяг за дзвінками і хвилинами, налаштовуємо чек-лист, звітність і формат впровадження під ваш процес.",
+        "любой объем": "будь-який обсяг",
+        "кастомные критерии": "кастомні критерії",
+        "self-hosted при потребности": "self-hosted за потреби",
+        "поиск паттернов": "пошук патернів",
+        "рейтинг менеджеров": "рейтинг менеджерів",
+        "one-page отчет": "one-page звіт",
+        "Добавить в сценарий": "Додати сценарій",
+        "Снять сценарий": "Зняти сценарій"
+      });
+
+      Object.assign(textTranslations.en, {
+        "Интеграции": "Integrations",
+        "Админка": "Admin",
+        "Руководитель": "Owner",
+        "Навыки": "Skills",
+        "Отчет": "Report",
+        "AI-аудит выборки": "AI sample audit",
+        "из 52 звонков прошли проверку; 5 отброшены из-за качества записи": "47 of 52 calls passed review; 5 were rejected due to recording quality",
+        "Что будет в полной версии": "What the full version will include",
+        "Показываем не обещания “когда-нибудь”, а понятную дорожную карту: что уже можно тестировать руками, что будет автоматизировано и какие модули появятся после первых клиентов.": "We show a clear roadmap: what can be tested manually now, what will be automated, and which modules arrive after the first customers.",
+        "Полная карта возможностей": "Full capability map",
+        "Платформа собирает контроль звонков в одну систему: от поиска рисков и CRM-заметок до коучинга, отчетов и интеграций с телефонией.": "The platform unifies call QA in one system: risk detection, CRM notes, coaching, reports, and telephony integrations.",
+        "Интеграции и загрузка данных": "Integrations and data upload",
+        "Демо показывает не только ручную форму, но и будущий путь к автоматическому контролю звонков из телефонии, CRM и файловых выгрузок.": "The demo shows both manual intake and the future path to automated QA from telephony, CRM, and file exports.",
+        "Админка, роли и безопасность": "Admin, roles, and security",
+        "Этот экран показывает будущую основу SaaS: кто что видит, как ограничивается free trial, как защищаются данные и как управлять заявками.": "This screen shows the future SaaS foundation: permissions, free trial limits, data protection, and request management.",
+        "Roadmap продукта": "Product roadmap",
+        "Показываем тестовой группе, что уже можно пробовать, что будет следующим и куда развивается платформа.": "We show the test group what can be tried now, what comes next, and where the platform is going.",
+        "Мини-аудит команды": "Team mini-audit",
+        "Для небольшой выборки отдела: до 20 коротких звонков или до 120 минут суммарно.": "For a small team sample: up to 20 short calls or up to 120 total minutes.",
+        "Индивидуальный аудит / внедрение": "Custom audit / setup",
+        "Подбираем объем по звонкам и минутам, настраиваем чек-лист, отчетность и формат внедрения под ваш процесс.": "We fit the volume by calls and minutes, then tune the checklist, reporting, and setup format to your process.",
+        "любой объем": "any volume",
+        "кастомные критерии": "custom criteria",
+        "self-hosted при потребности": "self-hosted if needed",
+        "поиск паттернов": "pattern search",
+        "рейтинг менеджеров": "manager ranking",
+        "one-page отчет": "one-page report",
+        "Добавить в сценарий": "Add scenario",
+        "Снять сценарий": "Remove scenario"
+      });
+
+      Object.assign(textTranslations.uk, {
+        "для владельцев, РОПов и руководителей сервиса": "для власників, РОПів і керівників сервісу",
+        "Найдите звонки, где менеджеры теряют заявки, до того как деньги уйдут конкурентам.": "Знайдіть дзвінки, де менеджери втрачають заявки, до того як гроші підуть конкурентам.",
+        "Вы загружаете 5 звонков или транскриптов. AI проверяет диалоги по чек-листу, находит критические ошибки и показывает, что исправить в скрипте уже завтра.": "Ви завантажуєте 5 дзвінків або транскриптів. AI перевіряє діалоги за чек-листом, знаходить критичні помилки і показує, що виправити в скрипті вже завтра.",
+        "Не просто текст": "Не просто текст",
+        "а причина потери лида и действие": "а причина втрати ліда і дія",
+        "Не ручная прослушка": "Не ручне прослуховування",
+        "а проверка всей выборки звонков": "а перевірка всієї вибірки дзвінків",
+        "Не “когда-нибудь”": "Не “колись”",
+        "а отчет, который можно обсудить на планерке": "а звіт, який можна обговорити на планірці",
+        "Получить бесплатный разбор": "Отримати безкоштовний розбір",
+        "Как это работает?": "Як це працює?",
+        "Как выглядит первый результат": "Як виглядає перший результат",
+        "Вы даете звонки": "Ви даєте дзвінки",
+        "До 5 звонков, до 15 минут каждый, ссылкой или текстом.": "До 5 дзвінків, до 15 хвилин кожен, посиланням або текстом.",
+        "AI ищет фатальные ошибки": "AI шукає фатальні помилки",
+        "Цена без ценности, нет бюджета, нет следующего шага, токсичный тон.": "Ціна без цінності, немає бюджету, немає наступного кроку, токсичний тон.",
+        "Вы получаете one-page отчет": "Ви отримуєте one-page звіт",
+        "Главный риск, цитата, оценка, action items и предложение полного аудита.": "Головний ризик, цитата, оцінка, action items і пропозиція повного аудиту.",
+        "Посмотреть форматы разборов": "Подивитися формати розборів",
+        "FAQ: что это, как работает и зачем бизнесу": "FAQ: що це, як працює і навіщо бізнесу",
+        "Короткие ответы на вопросы, которые обычно появляются до заявки: про данные, цену, безопасность, отличие от транскрибации и реальную пользу.": "Короткі відповіді на питання, які зазвичай з'являються до заявки: про дані, ціну, безпеку, відмінність від транскрибації і реальну користь.",
+        "Оставить заявку": "Залишити заявку",
+        "Чем это отличается от обычной транскрибации?": "Чим це відрізняється від звичайної транскрибації?",
+        "Транскрибация дает текст. CallControl AI дает управленческий ответ: где потеряли клиента, какая фраза сломала диалог и что поменять в скрипте.": "Транскрибація дає текст. CallControl AI дає управлінську відповідь: де втратили клієнта, яка фраза зламала діалог і що змінити в скрипті.",
+        "Кому это полезно в первую очередь?": "Кому це корисно насамперед?",
+        "Владельцам, РОПам, руководителям клиент-сервиса и командам, где есть входящие/исходящие звонки и качество общения влияет на деньги.": "Власникам, РОПам, керівникам клієнт-сервісу і командам, де є вхідні/вихідні дзвінки і якість спілкування впливає на гроші.",
+        "Что нужно для бесплатного мини-аудита?": "Що потрібно для безкоштовного міні-аудиту?",
+        "До 5 звонков или транскриптов, желательно до 15 минут каждый, плюс короткий контекст: ниша, отдел, главная боль и что именно проверить.": "До 5 дзвінків або транскриптів, бажано до 15 хвилин кожен, плюс короткий контекст: ніша, відділ, головний біль і що саме перевірити.",
+        "Можно ли отправить не аудио, а текст?": "Чи можна надіслати не аудіо, а текст?",
+        "Да. Для старта текстовые транскрипты даже удобнее: быстрее проверить гипотезу и дешевле обработать первые заявки.": "Так. Для старту текстові транскрипти навіть зручніші: швидше перевірити гіпотезу і дешевше обробити перші заявки.",
+        "Что будет в отчете?": "Що буде у звіті?",
+        "Оценка выборки, главный риск, цитата из звонка, причина ошибки, action items для менеджера/РОПа и рекомендация, какой аудит делать дальше.": "Оцінка вибірки, головний ризик, цитата з дзвінка, причина помилки, action items для менеджера/РОПа і рекомендація, який аудит робити далі.",
+        "Вы заменяете РОПа?": "Ви замінюєте РОПа?",
+        "Нет. Система убирает рутину прослушки и подсвечивает, куда РОПу смотреть. Решения, обучение и внедрение все равно остаются за руководителем.": "Ні. Система прибирає рутину прослуховування і підсвічує, куди РОПу дивитися. Рішення, навчання і впровадження все одно залишаються за керівником.",
+        "Можно ли анализировать поддержку, а не продажи?": "Чи можна аналізувати підтримку, а не продажі?",
+        "Да. Для поддержки меняется чек-лист: тон, эмпатия, скорость реакции, эскалация, решение обращения, токсичные фразы и повторные обращения.": "Так. Для підтримки змінюється чек-лист: тон, емпатія, швидкість реакції, ескалація, вирішення звернення, токсичні фрази і повторні звернення.",
+        "Как защищаются записи?": "Як захищаються записи?",
+        "Почему бесплатный аудит ограничен?": "Чому безкоштовний аудит обмежений?",
+        "Сколько стоит следующий шаг?": "Скільки коштує наступний крок?",
+        "Можно ли подключить телефонию?": "Чи можна підключити телефонію?",
+        "Что будет считаться хорошим результатом теста?": "Що вважатиметься хорошим результатом тесту?"
+      });
+
+      Object.assign(textTranslations.en, {
+        "для владельцев, РОПов и руководителей сервиса": "for owners, sales leads, and service managers",
+        "Найдите звонки, где менеджеры теряют заявки, до того как деньги уйдут конкурентам.": "Find the calls where managers lose leads before the money goes to competitors.",
+        "Вы загружаете 5 звонков или транскриптов. AI проверяет диалоги по чек-листу, находит критические ошибки и показывает, что исправить в скрипте уже завтра.": "Upload 5 calls or transcripts. AI checks them against a checklist, finds critical mistakes, and shows what to fix in the script tomorrow.",
+        "Не просто текст": "Not just text",
+        "а причина потери лида и действие": "but the reason the lead was lost and the action to take",
+        "Не ручная прослушка": "Not manual listening",
+        "а проверка всей выборки звонков": "but a review of the whole call sample",
+        "Не “когда-нибудь”": "Not someday",
+        "а отчет, который можно обсудить на планерке": "but a report you can discuss in a team meeting",
+        "Получить бесплатный разбор": "Get a free review",
+        "Как это работает?": "How does it work?",
+        "Как выглядит первый результат": "What the first result looks like",
+        "Вы даете звонки": "You provide calls",
+        "До 5 звонков, до 15 минут каждый, ссылкой или текстом.": "Up to 5 calls, 15 minutes each, as links or text.",
+        "AI ищет фатальные ошибки": "AI finds fatal errors",
+        "Цена без ценности, нет бюджета, нет следующего шага, токсичный тон.": "Price without value, no budget, no next step, toxic tone.",
+        "Вы получаете one-page отчет": "You get a one-page report",
+        "Главный риск, цитата, оценка, action items и предложение полного аудита.": "Main risk, quote, score, action items, and a full-audit offer.",
+        "Посмотреть форматы разборов": "View audit formats",
+        "FAQ: что это, как работает и зачем бизнесу": "FAQ: what it is, how it works, and why it matters",
+        "Короткие ответы на вопросы, которые обычно появляются до заявки: про данные, цену, безопасность, отличие от транскрибации и реальную пользу.": "Short answers to common pre-request questions: data, pricing, security, transcription differences, and real business value.",
+        "Оставить заявку": "Submit request",
+        "Чем это отличается от обычной транскрибации?": "How is this different from transcription?",
+        "Транскрибация дает текст. CallControl AI дает управленческий ответ: где потеряли клиента, какая фраза сломала диалог и что поменять в скрипте.": "Transcription gives text. CallControl AI gives a management answer: where the client was lost, which phrase broke the dialogue, and what to change in the script.",
+        "Кому это полезно в первую очередь?": "Who benefits first?",
+        "Владельцам, РОПам, руководителям клиент-сервиса и командам, где есть входящие/исходящие звонки и качество общения влияет на деньги.": "Owners, sales leads, service managers, and teams where inbound/outbound call quality affects revenue.",
+        "Что нужно для бесплатного мини-аудита?": "What is needed for a free mini-audit?",
+        "До 5 звонков или транскриптов, желательно до 15 минут каждый, плюс короткий контекст: ниша, отдел, главная боль и что именно проверить.": "Up to 5 calls or transcripts, ideally 15 minutes each, plus short context: niche, team, main pain, and what to check.",
+        "Можно ли отправить не аудио, а текст?": "Can I send text instead of audio?",
+        "Да. Для старта текстовые транскрипты даже удобнее: быстрее проверить гипотезу и дешевле обработать первые заявки.": "Yes. Text transcripts are often better at the start: faster to validate and cheaper to process.",
+        "Что будет в отчете?": "What will be in the report?",
+        "Оценка выборки, главный риск, цитата из звонка, причина ошибки, action items для менеджера/РОПа и рекомендация, какой аудит делать дальше.": "Sample score, main risk, call quote, mistake reason, action items for manager/sales lead, and a recommendation for the next audit.",
+        "Вы заменяете РОПа?": "Do you replace the sales lead?",
+        "Нет. Система убирает рутину прослушки и подсвечивает, куда РОПу смотреть. Решения, обучение и внедрение все равно остаются за руководителем.": "No. The system removes listening routine and shows where to look. Decisions, coaching, and adoption stay with the leader.",
+        "Можно ли анализировать поддержку, а не продажи?": "Can it analyze support, not sales?",
+        "Да. Для поддержки меняется чек-лист: тон, эмпатия, скорость реакции, эскалация, решение обращения, токсичные фразы и повторные обращения.": "Yes. For support, the checklist changes: tone, empathy, response speed, escalation, resolution quality, toxic phrases, and repeat contacts.",
+        "Как защищаются записи?": "How are recordings protected?",
+        "Почему бесплатный аудит ограничен?": "Why is the free audit limited?",
+        "Сколько стоит следующий шаг?": "How much is the next step?",
+        "Можно ли подключить телефонию?": "Can telephony be connected?",
+        "Что будет считаться хорошим результатом теста?": "What counts as a good test result?"
+      });
+
+      Object.assign(textTranslations.uk, {
+        "Получить бесплатный mini-audit": "Отримати безкоштовний mini-audit",
+        "Посмотреть демо": "Подивитися демо",
+        "Вы загружаете 3-5 звонков или транскриптов. AI проверяет диалоги по чек-листу, находит критические ошибки и показывает, что исправить в скрипте уже завтра.": "Ви завантажуєте 3-5 дзвінків або транскриптів. AI перевіряє діалоги за чек-листом, знаходить критичні помилки і показує, що виправити в скрипті вже завтра.",
+        "Что вы получите после 3-5 звонков": "Що ви отримаєте після 3-5 дзвінків",
+        "Мини-аудит не заставляет читать простыню текста. Он сразу показывает, где потерялась заявка, какой момент это доказывает и что сделать на следующей планерке.": "Міні-аудит не змушує читати полотно тексту. Він одразу показує, де загубилася заявка, який момент це доводить і що зробити на наступній планірці.",
+        "Общий score": "Загальний score",
+        "Короткая оценка выборки: насколько звонки проходят базовый стандарт качества.": "Коротка оцінка вибірки: наскільки дзвінки проходять базовий стандарт якості.",
+        "Главный риск": "Головний ризик",
+        "Самая дорогая ошибка: цена, бюджет, следующий шаг, тон или уход к конкуренту.": "Найдорожча помилка: ціна, бюджет, наступний крок, тон або перехід до конкурента.",
+        "2-3 цитаты": "2-3 цитати",
+        "Конкретные фразы из звонков, чтобы было видно доказательство, а не “мнение AI”.": "Конкретні фрази з дзвінків, щоб було видно доказ, а не “думку AI”.",
+        "Action items": "Action items",
+        "Что исправить в скрипте, вопросах или финале разговора уже завтра.": "Що виправити в скрипті, питаннях або фіналі розмови вже завтра.",
+        "Рекомендация РОПу": "Рекомендація РОПу",
+        "Кого обучать, какой навык просел и какой звонок взять как эталон.": "Кого навчати, яка навичка просіла і який дзвінок взяти як еталон.",
+        "Следующий аудит": "Наступний аудит",
+        "Что проверить дальше: 20 звонков, отдел целиком, поддержку или отдельную нишу.": "Що перевірити далі: 20 дзвінків, відділ повністю, підтримку або окрему нішу.",
+        "Обычный транскрипт": "Звичайний транскрипт",
+        "Дает текст разговора, но не объясняет, где потерялась заявка.": "Дає текст розмови, але не пояснює, де загубилася заявка.",
+        "РОП все равно читает вручную и тратит время на поиск смысла.": "РОП усе одно читає вручну і витрачає час на пошук сенсу.",
+        "Не показывает приоритет: что чинить завтра, а что можно отложить.": "Не показує пріоритет: що виправляти завтра, а що можна відкласти.",
+        "Не превращается в задачу для менеджера или план планерки.": "Не перетворюється на задачу для менеджера або план планірки.",
+        "Показывает риск, цитату, причину ошибки и конкретное действие.": "Показує ризик, цитату, причину помилки і конкретну дію.",
+        "Собирает scorecard, чек-лист, coaching focus и вывод для РОПа.": "Збирає scorecard, чек-лист, coaching focus і висновок для РОПа.",
+        "Подходит не только продажам, но и поддержке, сервису, колл-центрам.": "Підходить не тільки продажам, а й підтримці, сервісу, кол-центрам.",
+        "Помогает быстро решить: нужен полный аудит или гипотеза слабая.": "Допомагає швидко вирішити: потрібен повний аудит чи гіпотеза слабка.",
+        "Ниша": "Ніша",
+        "Формат данных": "Формат даних",
+        "Аудио-файлы": "Аудіо-файли",
+        "Транскрипты": "Транскрипти",
+        "Ссылка на папку": "Посилання на папку",
+        "CSV / экспорт": "CSV / експорт",
+        "Владелец": "Власник",
+        "Маркетолог": "Маркетолог",
+        "Другое": "Інше",
+        "Авто": "Авто",
+        "Записи используются только для аудита. Не передаем третьим лицам и не используем для обучения публичных моделей.": "Записи використовуються тільки для аудиту. Не передаємо третім особам і не використовуємо для навчання публічних моделей."
+      });
+
+      Object.assign(textTranslations.en, {
+        "Получить бесплатный mini-audit": "Get a free mini-audit",
+        "Посмотреть демо": "View demo",
+        "Вы загружаете 3-5 звонков или транскриптов. AI проверяет диалоги по чек-листу, находит критические ошибки и показывает, что исправить в скрипте уже завтра.": "Upload 3-5 calls or transcripts. AI checks them against a checklist, finds critical mistakes, and shows what to fix in the script tomorrow.",
+        "Что вы получите после 3-5 звонков": "What you get after 3-5 calls",
+        "Мини-аудит не заставляет читать простыню текста. Он сразу показывает, где потерялась заявка, какой момент это доказывает и что сделать на следующей планерке.": "The mini-audit does not force you to read a wall of text. It shows where the lead was lost, which moment proves it, and what to discuss in the next team meeting.",
+        "Общий score": "Overall score",
+        "Короткая оценка выборки: насколько звонки проходят базовый стандарт качества.": "A short sample score: how well calls pass the baseline quality standard.",
+        "Главный риск": "Main risk",
+        "Самая дорогая ошибка: цена, бюджет, следующий шаг, тон или уход к конкуренту.": "The most expensive mistake: price, budget, next step, tone, or competitor risk.",
+        "2-3 цитаты": "2-3 quotes",
+        "Конкретные фразы из звонков, чтобы было видно доказательство, а не “мнение AI”.": "Specific call phrases, so the report shows evidence, not just an AI opinion.",
+        "Action items": "Action items",
+        "Что исправить в скрипте, вопросах или финале разговора уже завтра.": "What to fix in the script, questions, or call ending tomorrow.",
+        "Рекомендация РОПу": "Sales lead recommendation",
+        "Кого обучать, какой навык просел и какой звонок взять как эталон.": "Who to coach, which skill dropped, and which call to use as the benchmark.",
+        "Следующий аудит": "Next audit",
+        "Что проверить дальше: 20 звонков, отдел целиком, поддержку или отдельную нишу.": "What to check next: 20 calls, the whole team, support, or a specific niche.",
+        "Обычный транскрипт": "Regular transcript",
+        "Дает текст разговора, но не объясняет, где потерялась заявка.": "Gives the call text but does not explain where the lead was lost.",
+        "РОП все равно читает вручную и тратит время на поиск смысла.": "The sales lead still reads manually and spends time looking for meaning.",
+        "Не показывает приоритет: что чинить завтра, а что можно отложить.": "Does not prioritize what to fix tomorrow and what can wait.",
+        "Не превращается в задачу для менеджера или план планерки.": "Does not become a manager task or a team meeting plan.",
+        "Показывает риск, цитату, причину ошибки и конкретное действие.": "Shows risk, quote, mistake reason, and concrete action.",
+        "Собирает scorecard, чек-лист, coaching focus и вывод для РОПа.": "Combines scorecard, checklist, coaching focus, and a sales lead takeaway.",
+        "Подходит не только продажам, но и поддержке, сервису, колл-центрам.": "Fits sales, support, service teams, and call centers.",
+        "Помогает быстро решить: нужен полный аудит или гипотеза слабая.": "Helps decide quickly whether a full audit is needed or the hypothesis is weak.",
+        "Ниша": "Niche",
+        "Формат данных": "Data format",
+        "Аудио-файлы": "Audio files",
+        "Транскрипты": "Transcripts",
+        "Ссылка на папку": "Folder link",
+        "CSV / экспорт": "CSV / export",
+        "Владелец": "Owner",
+        "Маркетолог": "Marketer",
+        "Другое": "Other",
+        "Авто": "Auto",
+        "Записи используются только для аудита. Не передаем третьим лицам и не используем для обучения публичных моделей.": "Recordings are used only for the audit. We do not share them with third parties or use them to train public models."
+      });
+
+      function translateTextNodes(root = document.body) {
+        const dictionary = textTranslations[currentLanguage] || {};
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+          acceptNode(node) {
+            if (!node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+            if (node.parentElement && ["SCRIPT", "STYLE"].includes(node.parentElement.tagName)) return NodeFilter.FILTER_REJECT;
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        });
+        const nodes = [];
+        while (walker.nextNode()) nodes.push(walker.currentNode);
+        nodes.forEach((node) => {
+          if (!textNodeBase.has(node)) textNodeBase.set(node, node.nodeValue);
+          const base = textNodeBase.get(node);
+          const trimmed = base.trim();
+          if (currentLanguage === "ru") {
+            node.nodeValue = base;
+            return;
+          }
+          if (!dictionary[trimmed]) return;
+          node.nodeValue = base.replace(trimmed, dictionary[trimmed]);
+        });
+        document.documentElement.lang = currentLanguage === "uk" ? "uk" : currentLanguage;
+        document.querySelector("#topTitle").textContent = titleTranslations[currentLanguage][currentScreen] || titleTranslations.ru[currentScreen];
+      }
+
+      const calls = [
+        {
+          id: "4482",
+          level: "high",
+          title: "Дмитрий · цена и конкурент",
+          meta: "Высокий риск · клиент ушел в 'подумаю'",
+          badge: "Высокий риск · Звонок #4482",
+          lines: [
+            ["Клиент · 09:38", "Мне нравится квартира, но <mark>дорого</mark>. У конкурентов есть дешевле и вроде рассрочка прозрачнее."],
+            ["Менеджер Дмитрий · 09:44", "Ну, цены сейчас везде такие. Посмотрите сайт, если что — звоните."],
+            ["Клиент · 10:02", "Я понял, тогда подумаю."],
+            ["AI-находка", "Потеря инициативы: менеджер не уточнил, с чем клиент сравнивает цену, и не назначил конкретный следующий шаг."]
+          ],
+          risk: "<strong class='risk'>Брошенный лид.</strong> Клиент проявил интерес, но звонок закончился без даты следующего контакта.",
+          tags: ["Слив цены", "Нет следующего шага", "Конкурент"],
+          action: "Заменить ответ на: “С чем сравниваете? Давайте я покажу, за что здесь доплата, и забронирую просмотр на субботу 11:00”.",
+          rop: "Разобрать с Дмитрием блок “цена → ценность → следующий шаг” и дать 3 звонка на контроль."
+        },
+        {
+          id: "4495",
+          level: "high",
+          title: "Мария · следующий шаг",
+          meta: "Высокий риск · интерес есть, фиксации нет",
+          badge: "Высокий риск · Звонок #4495",
+          lines: [
+            ["Клиент · 04:12", "Да, планировки подходят. Я могу приехать посмотреть на выходных."],
+            ["Менеджер Мария · 04:20", "Хорошо, я вам тогда сейчас отправлю варианты в WhatsApp."],
+            ["Клиент · 04:36", "Ок, жду."],
+            ["AI-находка", "Менеджер не предложила конкретное время просмотра, хотя клиент сам дал сигнал готовности."]
+          ],
+          risk: "<strong class='risk'>Потерян горячий момент.</strong> Клиент был готов к просмотру, но встреча не назначена.",
+          tags: ["Нет призыва", "Горячий лид", "Просмотр"],
+          action: "Сказать: “Давайте зафиксируем просмотр: суббота 11:00 или воскресенье 14:00 удобнее?”",
+          rop: "Поставить Марии задачу: 10 звонков подряд закрывать на дату и время, не на отправку информации."
+        },
+        {
+          id: "4501",
+          level: "high",
+          title: "Дмитрий · нет бюджета",
+          meta: "Высокий риск · 12 минут без квалификации",
+          badge: "Высокий риск · Звонок #4501",
+          lines: [
+            ["Менеджер Дмитрий · 01:15", "У нас есть несколько объектов, расскажу по каждому."],
+            ["Клиент · 07:44", "А сколько вообще это стоит? Я рассчитываю до 80 тысяч."],
+            ["Менеджер Дмитрий · 07:52", "Тогда этот ЖК, наверное, не подходит."],
+            ["AI-находка", "Бюджет не уточнен в начале, из-за чего 7 минут ушли на неподходящее предложение."]
+          ],
+          risk: "<strong class='risk'>Потеря времени.</strong> Менеджер презентовал объект до понимания бюджета.",
+          tags: ["Нет бюджета", "Нецелевой лид", "Длинная презентация"],
+          action: "Добавить обязательный вопрос: “В каком бюджете рассматриваете покупку и какой способ оплаты планируете?”",
+          rop: "Включить контроль бюджета в первые 3 минуты как обязательный критерий чек-листа."
+        },
+        {
+          id: "4510",
+          level: "medium",
+          title: "Мария · слабое возражение",
+          meta: "Средний риск · ценность не доказана",
+          badge: "Средний риск · Звонок #4510",
+          lines: [
+            ["Клиент · 05:11", "Мне кажется, цена выше рынка."],
+            ["Менеджер Мария · 05:18", "Ну, это нормальная цена для этого района."],
+            ["Клиент · 05:43", "Понял, мне надо сравнить."],
+            ["AI-находка", "Возражение не провалено полностью, но менеджер не дала факты: инфраструктура, рассрочка, срок сдачи, паркинг."]
+          ],
+          risk: "<strong class='warn'>Средний риск.</strong> Клиент не получил аргументы ценности и ушел сравнивать.",
+          tags: ["Цена", "Ценность", "Сравнение"],
+          action: "Подготовить 3 факта ценности для объекта перед озвучиванием цены.",
+          rop: "Дать Марии карточку сравнения с конкурентами и проверить 5 следующих звонков по блоку “цена”."
+        },
+        {
+          id: "4520",
+          level: "medium",
+          title: "Иван · много говорит",
+          meta: "Средний риск · клиент мало вовлечен",
+          badge: "Средний риск · Звонок #4520",
+          lines: [
+            ["Менеджер Иван · 02:10", "Сейчас подробно расскажу про дом, инфраструктуру, сроки и планировки..."],
+            ["Клиент · 06:55", "А парковка есть?"],
+            ["Менеджер Иван · 07:01", "Да, но сначала еще по условиям оплаты расскажу."],
+            ["AI-находка", "Менеджер знает продукт, но говорит 78% времени и не развивает вопросы клиента."]
+          ],
+          risk: "<strong class='warn'>Средний риск.</strong> Клиент задает сигналы потребности, но менеджер продолжает презентацию.",
+          tags: ["Монолог", "Баланс речи", "Потребность"],
+          action: "После каждого блока презентации задавать вопрос: “Что для вас из этого важнее всего?”",
+          rop: "Иван может быть наставником по закрытию, но ему стоит снизить talk ratio до 55-60%."
+        },
+        {
+          id: "4533",
+          level: "medium",
+          title: "Мария · CRM follow-up",
+          meta: "Средний риск · нет фиксации в CRM",
+          badge: "Средний риск · Звонок #4533",
+          lines: [
+            ["Клиент · 03:31", "Перезвоните мне в четверг, я с женой обсужу."],
+            ["Менеджер Мария · 03:37", "Да, конечно, тогда наберу."],
+            ["AI-находка", "Менеджер согласилась, но не повторила дату/время и не зафиксировала канал связи."]
+          ],
+          risk: "<strong class='warn'>Средний риск.</strong> Follow-up зависит от памяти менеджера, а не от процесса.",
+          tags: ["CRM", "Follow-up", "Дата"],
+          action: "Повторить вслух: “Фиксирую четверг 12:00, напишу в WhatsApp за час до звонка”.",
+          rop: "Добавить проверку: каждый follow-up должен иметь дату, время и канал в CRM."
+        },
+        {
+          id: "4540",
+          level: "low",
+          title: "Иван · эталонный звонок",
+          meta: "Низкий риск · можно использовать для обучения",
+          badge: "Хороший результат · Звонок #4540",
+          lines: [
+            ["Клиент · 02:04", "Нам важна парковка и чтобы рядом была школа."],
+            ["Менеджер Иван · 02:12", "Понял. В вашем бюджете есть квартира в секции B, школа 7 минут пешком, паркинг можно забронировать. Давайте покажу в субботу в 11:00?"],
+            ["Клиент · 02:40", "Да, давайте."],
+            ["AI-находка", "Менеджер связал потребность клиента с конкретным объектом и сразу закрыл на просмотр."]
+          ],
+          risk: "<strong class='ok'>Низкий риск.</strong> Звонок подходит как эталонный пример для команды.",
+          tags: ["Эталон", "Потребность", "Призыв"],
+          action: "Сохранить звонок в библиотеку лучших примеров по блоку “закрытие на просмотр”.",
+          rop: "Использовать этот звонок на планерке для Марии и Дмитрия."
+        },
+        {
+          id: "4547",
+          level: "low",
+          title: "Иван · хорошая цена",
+          meta: "Низкий риск · ценность до цены",
+          badge: "Хороший результат · Звонок #4547",
+          lines: [
+            ["Клиент · 04:18", "Сколько стоит?"],
+            ["Менеджер Иван · 04:22", "Перед ценой покажу, что в нее входит: готовая инфраструктура, рассрочка без удорожания и паркинг со скидкой. После этого цена 92 тысячи."],
+            ["Клиент · 04:58", "Так звучит логично."],
+            ["AI-находка", "Менеджер назвал цену после ценности, поэтому возражение не возникло."]
+          ],
+          risk: "<strong class='ok'>Низкий риск.</strong> Хорошая работа с ценностью до озвучивания цены.",
+          tags: ["Цена", "Ценность", "Успех"],
+          action: "Сохранить формулировку как пример ответа на вопрос цены.",
+          rop: "Раздать фразу команде как шаблон для дорогих объектов."
+        },
+        {
+          id: "4552",
+          level: "low",
+          title: "Мария · сильная эмпатия",
+          meta: "Низкий риск · хороший контакт",
+          badge: "Хороший результат · Звонок #4552",
+          lines: [
+            ["Клиент · 01:26", "Мы уже устали смотреть, везде что-то не так."],
+            ["Менеджер Мария · 01:32", "Понимаю, это правда выматывает. Давайте я сначала уточню три вещи, чтобы не тратить ваше время на неподходящие варианты."],
+            ["AI-находка", "Хороший контакт и уважение ко времени клиента. Нужно только сильнее закрывать следующий шаг."]
+          ],
+          risk: "<strong class='ok'>Низкий риск.</strong> Контакт установлен, клиент открыт к диалогу.",
+          tags: ["Контакт", "Эмпатия", "Квалификация"],
+          action: "Добавить в финал: “Давайте зафиксируем следующий созвон после того, как вы посмотрите варианты”.",
+          rop: "У Марии сильный контакт. Основная зона роста — не начало звонка, а финальное закрытие."
+        }
+      ];
+
+      const coachData = {
+        team: {
+          focus: "<strong>Команда: фиксировать следующий шаг.</strong> Каждый звонок должен завершаться датой, временем и каналом следующего контакта.",
+          tag: "Закрытие",
+          skills: [76, 50, 48],
+          tasks: [
+            ["Прослушать эталонный звонок Ивана", "Показать команде, как закрывать на конкретную дату."],
+            ["Воркшоп по возражению “дорого”", "Собрать 3 ответа через ценность, а не оправдания."],
+            ["Контроль 10 следующих звонков", "AI проверяет, появилась ли фиксация следующего шага."]
+          ]
+        },
+        maria: {
+          focus: "<strong>Мария: закрывать на дату.</strong> Контакт хороший, но лиды зависают после отправки информации.",
+          tag: "Следующий шаг",
+          skills: [80, 58, 34],
+          tasks: [
+            ["10 звонков с датой следующего контакта", "В каждом финале должна быть дата, время и канал."],
+            ["Послушать эталонный звонок Ивана", "Взять фразу закрытия на просмотр."],
+            ["Переписать финал скрипта", "Убрать “я вам отправлю” без следующего действия."]
+          ]
+        },
+        dmitry: {
+          focus: "<strong>Дмитрий: бюджет в первые 3 минуты.</strong> Сейчас он часто презентует объект до квалификации.",
+          tag: "Квалификация",
+          skills: [55, 24, 18],
+          tasks: [
+            ["Вопрос о бюджете в начале", "Спросить бюджет и способ оплаты до презентации."],
+            ["Отработка “дорого”", "Использовать вопрос: “С чем сравниваете?”"],
+            ["3 контрольных звонка с РОПом", "Проверить, перестал ли менеджер спорить о цене."]
+          ]
+        },
+        ivan: {
+          focus: "<strong>Иван: снизить монологи.</strong> Он сильный продавец, но иногда говорит больше клиента.",
+          tag: "Баланс речи",
+          skills: [92, 68, 91],
+          tasks: [
+            ["Наставничество для Марии", "Показать технику закрытия на просмотр."],
+            ["Пауза после вопроса", "Давать клиенту 3 секунды перед продолжением."],
+            ["Собрать 2 эталонных звонка", "Подготовить лучшие примеры для библиотеки."]
+          ]
+        }
+      };
+
+      function setScreen(id) {
+        currentScreen = id;
+        document.querySelectorAll(".screen").forEach((screen) => screen.classList.remove("active"));
+        document.querySelector("#screen-" + id).classList.add("active");
+        document.querySelector("#topTitle").textContent = titleTranslations[currentLanguage][id] || titles[id] || id;
+        document.querySelectorAll("[data-screen]").forEach((button) => {
+          button.classList.toggle("active", button.dataset.screen === id);
+        });
+        translateTextNodes();
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+
+      document.querySelectorAll("[data-screen]").forEach((button) => {
+        button.addEventListener("click", () => setScreen(button.dataset.screen));
+      });
+
+      document.querySelectorAll("[data-jump]").forEach((button) => {
+        button.addEventListener("click", () => setScreen(button.dataset.jump));
+      });
+
+      document.querySelector("#sidebarToggle").addEventListener("click", () => {
+        document.querySelector("#appShell").classList.toggle("sidebar-collapsed");
+      });
+
+      document.querySelector("#languageSelect").addEventListener("change", (event) => {
+        currentLanguage = event.target.value;
+        translateTextNodes();
+      });
+
+      document.querySelectorAll("#themeToggle button").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll("#themeToggle button").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          if (button.dataset.theme === "light") {
+            document.body.dataset.theme = "light";
+          } else {
+            document.body.removeAttribute("data-theme");
+          }
+        });
+      });
+
+      function showToast() {
+        const toast = document.querySelector("#toast");
+        toast.classList.add("show");
+        window.setTimeout(() => toast.classList.remove("show"), 5200);
+      }
+
+      const LEAD_WEBHOOK_URL = window.location.protocol.startsWith("http") ? "/api/leads" : "";
+
+      document.querySelector("#leadForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (LEAD_WEBHOOK_URL) {
+          const submitButton = event.currentTarget.querySelector("button[type='submit']");
+          const payload = {
+            ...Object.fromEntries(new FormData(event.currentTarget).entries()),
+            language: currentLanguage,
+            userAgent: navigator.userAgent
+          };
+          submitButton.disabled = true;
+          submitButton.textContent = "Отправляем...";
+          const response = await fetch(LEAD_WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ source: "callcontrol-demo-room", ...payload })
+          });
+          submitButton.disabled = false;
+          submitButton.textContent = "Отправить заявку";
+          if (!response.ok) {
+            alert("Заявка не отправилась. Проверьте обязательные поля или попробуйте еще раз.");
+            return;
+          }
+        }
+        showToast();
+      });
+
+      document.querySelector("#ackTip").addEventListener("click", (event) => {
+        event.currentTarget.textContent = "Задача добавлена";
+        event.currentTarget.style.borderColor = "rgba(34, 197, 94, 0.5)";
+        showToast();
+      });
+
+      document.querySelector("#saveChecklist").addEventListener("click", (event) => {
+        event.currentTarget.textContent = "Настройки сохранены";
+        showToast();
+      });
+
+      function wireScenarioToggles() {
+        const active = document.querySelector("#activeScenarios");
+        const presets = document.querySelector("#presetScenarios");
+        document.querySelectorAll(".scenario-toggle").forEach((button) => {
+          button.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const card = event.currentTarget.closest(".scenario-card");
+            const isActive = card.parentElement === active;
+            if (isActive) {
+              presets.appendChild(card);
+              card.removeAttribute("open");
+              event.currentTarget.textContent = currentLanguage === "en" ? "Add scenario" : currentLanguage === "uk" ? "Додати сценарій" : "Добавить в сценарий";
+            } else {
+              active.appendChild(card);
+              card.setAttribute("open", "");
+              event.currentTarget.textContent = currentLanguage === "en" ? "Remove scenario" : currentLanguage === "uk" ? "Зняти сценарій" : "Снять сценарий";
+            }
+            showToast();
+          });
+        });
+      }
+
+      wireScenarioToggles();
+
+      function renderCalls(filter = "high") {
+        const list = calls.filter((call) => call.level === filter);
+        const picker = document.querySelector("#callPicker");
+        picker.innerHTML = list.map((call, index) => `
+          <button class="call-option ${index === 0 ? "active" : ""}" type="button" data-call="${call.id}">
+            <strong>#${call.id} · ${call.title}</strong>
+            <span>${call.meta}</span>
+          </button>
+        `).join("");
+
+        picker.querySelectorAll("[data-call]").forEach((button) => {
+          button.addEventListener("click", () => {
+            picker.querySelectorAll(".call-option").forEach((item) => item.classList.remove("active"));
+            button.classList.add("active");
+            renderCallDetail(button.dataset.call);
+          });
+        });
+
+        if (list[0]) renderCallDetail(list[0].id);
+      }
+
+      function renderCallDetail(id) {
+        const call = calls.find((item) => item.id === id);
+        if (!call) return;
+        const badge = document.querySelector("#callRiskBadge");
+        badge.textContent = call.badge;
+        badge.className = `chip ${call.level === "high" ? "risk-state-high" : call.level === "medium" ? "risk-state-medium" : "risk-state-low"}`;
+        document.querySelector("#callTranscript").innerHTML = call.lines.map((line) => `
+          <div class="line">
+            <div class="speaker">${line[0]}</div>
+            ${line[1]}
+          </div>
+        `).join("");
+        document.querySelector("#riskText").innerHTML = call.risk;
+        document.querySelector("#callTags").innerHTML = call.tags.map((tag, index) => `<span class="chip ${index === 0 ? "red" : index === 1 ? "yellow" : ""}">${tag}</span>`).join(" ");
+        document.querySelector("#actionText").textContent = call.action;
+        document.querySelector("#ropText").textContent = call.rop;
+        const ack = document.querySelector("#ackTip");
+        ack.textContent = "Назначить задачу РОПу";
+        ack.style.borderColor = "";
+        translateTextNodes();
+      }
+
+      document.querySelectorAll("#riskFilter button").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll("#riskFilter button").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          renderCalls(button.dataset.filter);
+        });
+      });
+
+      function renderCoach(key = "team") {
+        const data = coachData[key];
+        document.querySelector("#coachFocus").innerHTML = data.focus;
+        document.querySelector("#coachTag").textContent = data.tag;
+        const skillIds = ["skillContact", "skillObjection", "skillClose"];
+        const textIds = ["skillContactText", "skillObjectionText", "skillCloseText"];
+        data.skills.forEach((score, index) => {
+          const bar = document.querySelector("#" + skillIds[index]);
+          const label = document.querySelector("#" + textIds[index]);
+          bar.style.width = score + "%";
+          bar.style.background = score >= 75 ? "var(--green)" : score >= 50 ? "var(--yellow)" : "var(--red)";
+          label.textContent = score + "%";
+          label.className = score >= 75 ? "ok" : score >= 50 ? "warn" : "risk";
+        });
+        document.querySelector("#coachTasks").innerHTML = data.tasks.map((task, index) => `
+          <div class="item ${index === 0 ? "yellow" : index === 2 ? "green" : ""}">
+            <strong>${task[0]}</strong>
+            <p>${task[1]}</p>
+          </div>
+        `).join("");
+        translateTextNodes();
+      }
+
+      document.querySelector("#coachingScope").addEventListener("change", (event) => {
+        renderCoach(event.target.value);
+      });
+
+      renderCalls("high");
+      renderCoach("team");
+
+      document.querySelector("#copyBrief").addEventListener("click", async () => {
+        const brief = `Поля формы CallControl AI Mini-Audit:
+- Имя
+- Роль: Владелец / РОП / Маркетолог / Другое
+- Telegram / WhatsApp
+- Компания
+- Сайт
+- Размер отдела: 1-2 / 3-10 / 10-30 / 30+
+- Ниша: Продажи / Клиент-сервис / Недвижимость / EdTech / Авто / Другое
+- Формат данных: Аудио-файлы / Транскрипты / Ссылка на папку / CSV
+- Главная боль
+- Ссылка на звонки или транскрипты
+
+Ограничение: до 5 звонков, до 15 минут каждый. 1 отчет на 1 компанию.`;
+        try {
+          await navigator.clipboard.writeText(brief);
+          showToast();
+        } catch (error) {
+          alert(brief);
+        }
+      });
+
+      translateTextNodes();
+    </script>
+  </body>
+</html>

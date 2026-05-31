@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CallControl AI — One-Page Mini-Audit</title>
+    <style>
+      @page { size: A4; margin: 12mm; }
+      :root {
+        --bg: #f4f8fb;
+        --ink: #0f2034;
+        --muted: #52687d;
+        --line: #cad8e5;
+        --blue: #0369a1;
+        --red: #be123c;
+        --yellow: #b45309;
+        --green: #15803d;
+        --card: #ffffff;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .page {
+        width: 210mm;
+        min-height: 297mm;
+        margin: 0 auto;
+        padding: 14mm;
+        background: var(--card);
+      }
+      .top {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 16px;
+        align-items: start;
+        padding-bottom: 14px;
+        border-bottom: 2px solid var(--ink);
+      }
+      .brand {
+        color: var(--blue);
+        font-weight: 850;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        font-size: 10px;
+      }
+      h1 {
+        margin: 4px 0 6px;
+        font-size: 28px;
+        line-height: 1;
+        letter-spacing: -0.045em;
+      }
+      h2 {
+        margin: 0 0 8px;
+        font-size: 14px;
+        letter-spacing: -0.02em;
+      }
+      p { margin: 0; color: var(--muted); }
+      .meta {
+        text-align: right;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .score {
+        margin-top: 8px;
+        font-size: 38px;
+        font-weight: 900;
+        color: var(--red);
+        letter-spacing: -0.06em;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin-top: 14px;
+      }
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        background: #fbfdff;
+      }
+      .card.red { border-color: rgba(190,18,60,0.22); background: #fff5f7; }
+      .card.yellow { border-color: rgba(180,83,9,0.24); background: #fff9ed; }
+      .card.green { border-color: rgba(21,128,61,0.2); background: #f1fbf5; }
+      .label {
+        color: var(--muted);
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        margin-bottom: 5px;
+      }
+      .value {
+        font-size: 22px;
+        font-weight: 900;
+        letter-spacing: -0.04em;
+      }
+      .red-text { color: var(--red); }
+      .yellow-text { color: var(--yellow); }
+      .green-text { color: var(--green); }
+      .section {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+      .wide { grid-column: 1 / -1; }
+      .quote {
+        margin-top: 8px;
+        padding: 10px;
+        border-left: 4px solid var(--red);
+        background: #fff;
+        color: var(--ink);
+        font-weight: 650;
+      }
+      ul, ol { margin: 8px 0 0; padding-left: 18px; }
+      li { margin: 4px 0; }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 6px;
+      }
+      th, td {
+        border-bottom: 1px solid var(--line);
+        padding: 7px 6px;
+        text-align: left;
+        vertical-align: top;
+      }
+      th {
+        color: var(--muted);
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .footer {
+        margin-top: 14px;
+        padding: 12px;
+        border-radius: 8px;
+        background: #0f2034;
+        color: #fff;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        align-items: center;
+      }
+      .footer p { color: #c8d5e1; }
+      .cta {
+        padding: 9px 12px;
+        border-radius: 7px;
+        background: #38bdf8;
+        color: #041018;
+        font-weight: 850;
+        white-space: nowrap;
+      }
+      .small { font-size: 10px; }
+      @media print {
+        body { background: #fff; }
+        .page { margin: 0; box-shadow: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header class="top">
+        <div>
+          <div class="brand">CallControl AI · Mini-Audit</div>
+          <h1>AI-аудит звонков: [Название компании]</h1>
+          <p>Разбор 5 звонков показывает, где команда теряет заявки, деньги и качество коммуникации.</p>
+        </div>
+        <div class="meta">
+          <div>Дата: [12.05.2026]</div>
+          <div>Объем: 5 звонков / до 75 минут</div>
+          <div>Статус: Free Mini-Audit</div>
+          <div class="score">42/100</div>
+          <div>общая оценка выборки</div>
+        </div>
+      </header>
+
+      <section class="grid">
+        <div class="card red">
+          <div class="label">Value at Risk</div>
+          <div class="value red-text">$4,800</div>
+          <p>Потенциальная сумма сделок, где риск возник из-за коммуникации.</p>
+        </div>
+        <div class="card yellow">
+          <div class="label">Главная дыра</div>
+          <div class="value yellow-text">Закрытие</div>
+          <p>В 3 из 5 звонков не зафиксирован конкретный следующий шаг.</p>
+        </div>
+        <div class="card green">
+          <div class="label">Что исправить завтра</div>
+          <div class="value green-text">1 скрипт</div>
+          <p>Добавить обязательную развилку даты/времени в финал звонка.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="card red wide">
+          <h2>Ouch Moment: главный болезненный инсайт</h2>
+          <p>В звонке №2 клиент прямо дал сигнал готовности к покупке, но менеджер завершил разговор без предложения оплаты, встречи или точной даты следующего контакта.</p>
+          <div class="quote">“Ну, вы подумайте, если что — напишите.”</div>
+          <p class="small" style="margin-top:8px">Последствие: горячий лид ушел в паузу, а компания потеряла контроль над следующим шагом.</p>
+        </div>
+
+        <div class="card">
+          <h2>Топ-ошибки по выборке</h2>
+          <table>
+            <thead><tr><th>Ошибка</th><th>Частота</th><th>Риск</th></tr></thead>
+            <tbody>
+              <tr><td>Нет следующего шага</td><td>3/5</td><td class="red-text">Высокий</td></tr>
+              <tr><td>Цена до ценности</td><td>2/5</td><td class="yellow-text">Средний</td></tr>
+              <tr><td>Бюджет не уточнен</td><td>2/5</td><td class="yellow-text">Средний</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2>Action Items на завтра</h2>
+          <ol>
+            <li>Запретить финал “подумайте”; заменить на выбор даты и канала.</li>
+            <li>До цены задавать вопрос о бюджете и критериях сравнения.</li>
+            <li>Разобрать с командой один эталонный и один провальный звонок.</li>
+          </ol>
+        </div>
+
+        <div class="card wide">
+          <h2>Что покажет полный аудит</h2>
+          <ul>
+            <li>Является ли ошибка системной для всего отдела, а не случайностью в 5 звонках.</li>
+            <li>Кто из менеджеров теряет деньги на квалификации, цене, возражениях и закрытии.</li>
+            <li>Какие фразы нужно убрать из скрипта, а какие сделать стандартом команды.</li>
+          </ul>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <div>
+          <strong>Рекомендация:</strong>
+          <p>Запустить мини-аудит на 20-50 звонков, чтобы подтвердить паттерн и собрать план обучения для РОПа.</p>
+        </div>
+        <div class="cta">Заказать полный аудит</div>
+      </footer>
+    </main>
+  </body>
+</html>

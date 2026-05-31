@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CallControl AI Online Leads</title>
+    <style>
+      :root {
+        --bg:#f7fafc;
+        --card:#fff;
+        --ink:#111827;
+        --muted:#64748b;
+        --line:#dbe4ee;
+        --blue:#0284c7;
+        --danger:#dc2626;
+      }
+
+      * { box-sizing:border-box; }
+
+      body {
+        margin:0;
+        background:var(--bg);
+        color:var(--ink);
+        font-family:Inter, system-ui, sans-serif;
+        font-size:14px;
+      }
+
+      main {
+        max-width:1440px;
+        margin:0 auto;
+        padding:24px;
+        display:grid;
+        gap:14px;
+      }
+
+      h1 {
+        margin:0;
+        font-size:30px;
+        letter-spacing:-.045em;
+      }
+
+      p {
+        margin:0;
+        color:var(--muted);
+        line-height:1.55;
+      }
+
+      .card {
+        background:var(--card);
+        border:1px solid var(--line);
+        border-radius:16px;
+        padding:16px;
+        box-shadow:0 12px 34px rgba(15,23,42,.05);
+      }
+
+      .row {
+        display:flex;
+        gap:10px;
+        align-items:center;
+        flex-wrap:wrap;
+      }
+
+      input, select {
+        border:1px solid var(--line);
+        border-radius:12px;
+        padding:11px 12px;
+        font:inherit;
+        background:#fff;
+      }
+
+      input[type="search"] {
+        min-width:260px;
+        flex:1;
+      }
+
+      input[type="password"] {
+        min-width:240px;
+      }
+
+      button, a.btn {
+        border:0;
+        background:var(--blue);
+        color:#fff;
+        border-radius:12px;
+        padding:11px 14px;
+        font-weight:800;
+        cursor:pointer;
+        text-decoration:none;
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+      }
+
+      .muted { color:var(--muted); }
+      .error { color:var(--danger); font-weight:700; }
+
+      table {
+        width:100%;
+        border-collapse:collapse;
+      }
+
+      th, td {
+        padding:10px 8px;
+        border-bottom:1px solid var(--line);
+        text-align:left;
+        vertical-align:top;
+      }
+
+      th {
+        font-size:11px;
+        color:var(--muted);
+        text-transform:uppercase;
+        letter-spacing:.08em;
+      }
+
+      code {
+        background:#edf2f7;
+        padding:2px 5px;
+        border-radius:6px;
+      }
+
+      .tag {
+        display:inline-flex;
+        align-items:center;
+        border-radius:999px;
+        padding:4px 8px;
+        background:#eef6ff;
+        color:#0c4a6e;
+        font-size:12px;
+        font-weight:700;
+      }
+
+      .lead-link {
+        color:var(--blue);
+        word-break:break-all;
+        text-decoration:none;
+      }
+
+      @media (max-width:900px){
+        .row { display:grid; }
+        input, select, button, a.btn { width:100%; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card">
+        <h1>Online Leads</h1>
+        <p>Операторский экран заявок из <code>/api/leads</code>. Нужен <code>ADMIN_TOKEN</code>. Если KV не подключен, форма все равно может принимать заявки и отправлять Telegram, но список здесь будет пустым.</p>
+      </section>
+
+      <section class="card">
+        <div class="row">
+          <input id="token" type="password" placeholder="ADMIN_TOKEN" autocomplete="off" />
+          <button id="load">Показать заявки</button>
+          <a class="btn" id="csv" href="#">CSV export</a>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="row">
+          <input id="search" type="search" placeholder="Поиск по имени, компании, контакту, боли или ссылке" />
+          <select id="statusFilter">
+            <option value="">Все статусы</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="card">
+        <div id="state" class="muted">Введите ADMIN_TOKEN и нажмите “Показать заявки”.</div>
+      </section>
+
+      <section class="card">
+        <table>
+          <thead>
+            <tr>
+              <th>Дата</th>
+              <th>Статус</th>
+              <th>Клиент</th>
+              <th>Компания</th>
+              <th>Контакт</th>
+              <th>Команда</th>
+              <th>Ниша</th>
+              <th>Боль</th>
+              <th>Данные</th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            <tr>
+              <td colspan="9"><p class="muted">Заявки еще не загружены.</p></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      let allLeads = [];
+
+      const aliases = {
+        team: (lead) => lead.team || lead.teamSize || "-",
+        site: (lead) => lead.site || lead.website || "",
+        data: (lead) => lead.data || lead.dataLink || ""
+      };
+
+      function esc(value) {
+        return String(value || "").replace(/[&<>"']/g, (char) => ({
+          "&":"&amp;",
+          "<":"&lt;",
+          ">":"&gt;",
+          '"':"&quot;",
+          "'":"&#39;"
+        }[char]));
+      }
+
+      function setState(message, type = "muted") {
+        const el = document.querySelector("#state");
+        el.className = type;
+        el.textContent = message;
+      }
+
+      function getFilteredLeads() {
+        const query = document.querySelector("#search").value.trim().toLowerCase();
+        const status = document.querySelector("#statusFilter").value;
+
+        return allLeads.filter((lead) => {
+          const haystack = [
+            lead.name,
+            lead.company,
+            lead.contact,
+            lead.pain,
+            aliases.site(lead),
+            aliases.data(lead)
+          ].join(" ").toLowerCase();
+
+          const queryOk = !query || haystack.includes(query);
+          const statusOk = !status || String(lead.status || "") === status;
+
+          return queryOk && statusOk;
+        });
+      }
+
+      function renderStatusOptions(leads) {
+        const select = document.querySelector("#statusFilter");
+        const current = select.value;
+        const statuses = [...new Set(leads.map((lead) => lead.status).filter(Boolean))];
+
+        select.innerHTML = `
+          <option value="">Все статусы</option>
+          ${statuses.map((status) => `<option value="${esc(status)}">${esc(status)}</option>`).join("")}
+        `;
+        select.value = statuses.includes(current) ? current : "";
+      }
+
+      function renderDataCell(lead) {
+        const value = aliases.data(lead);
+        if (!value) return "-";
+        if (/^https?:\/\//i.test(value)) {
+          return `<a class="lead-link" href="${esc(value)}" target="_blank" rel="noreferrer">${esc(value)}</a>`;
+        }
+        return esc(value);
+      }
+
+      function renderTable() {
+        const leads = getFilteredLeads();
+
+        const rows = leads.length ? leads.map((lead) => `
+          <tr>
+            <td>${esc(lead.createdAt)}</td>
+            <td><span class="tag">${esc(lead.status || "-")}</span></td>
+            <td>
+              <strong>${esc(lead.name)}</strong>
+              <div class="muted">${esc(lead.role || "")}</div>
+            </td>
+            <td>
+              ${esc(lead.company)}
+              <div class="muted">${esc(aliases.site(lead))}</div>
+            </td>
+            <td>${esc(lead.contact)}</td>
+            <td>${esc(aliases.team(lead))}</td>
+            <td>${esc(lead.niche || "-")}</td>
+            <td>${esc(lead.pain || "-")}</td>
+            <td>${renderDataCell(lead)}</td>
+          </tr>
+        `).join("") : `
+          <tr>
+            <td colspan="9"><p class="muted">Заявок по текущему фильтру нет.</p></td>
+          </tr>
+        `;
+
+        document.querySelector("#rows").innerHTML = rows;
+      }
+
+      async function loadLeads() {
+        const token = document.querySelector("#token").value.trim();
+
+        if (!token) {
+          setState("Введите ADMIN_TOKEN.", "error");
+          return;
+        }
+
+        localStorage.setItem("callcontrol_admin_token_hint", token);
+        document.querySelector("#csv").href = `/api/leads?token=${encodeURIComponent(token)}&format=csv`;
+
+        setState("Загружаю заявки...");
+
+        try {
+          const response = await fetch(`/api/leads?token=${encodeURIComponent(token)}`);
+          const data = await response.json();
+
+          if (!response.ok) {
+            if (data.error === "unauthorized") {
+              setState("Нет доступа. Проверь ADMIN_TOKEN.", "error");
+              return;
+            }
+
+            if (data.error === "leads_kv_not_configured") {
+              setState("KV не подключен. Telegram-заявки могут приходить, но список здесь пока не хранится.", "error");
+              return;
+            }
+
+            setState("Не удалось загрузить заявки.", "error");
+            return;
+          }
+
+          allLeads = Array.isArray(data.leads) ? data.leads : [];
+
+          renderStatusOptions(allLeads);
+          renderTable();
+
+          setState(allLeads.length ? `Загружено заявок: ${allLeads.length}.` : "Заявок пока нет.");
+        } catch {
+          setState("Ошибка загрузки заявок.", "error");
+        }
+      }
+
+      const savedToken = localStorage.getItem("callcontrol_admin_token_hint");
+      if (savedToken) document.querySelector("#token").value = savedToken;
+
+      document.querySelector("#load").addEventListener("click", loadLeads);
+      document.querySelector("#search").addEventListener("input", renderTable);
+      document.querySelector("#statusFilter").addEventListener("change", renderTable);
+    </script>
+  </body>
+</html>

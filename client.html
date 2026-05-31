@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CallControl AI Client Workspace</title>
+    <style>
+      :root {
+        --bg:#f5f7fb; --panel:#ffffff; --ink:#101827; --muted:#64748b; --line:#dbe4ee;
+        --blue:#0284c7; --red:#e11d48; --yellow:#d97706; --green:#16a34a; --soft:#eef6ff;
+      }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--bg); color:var(--ink); font-family:Inter, system-ui, -apple-system, sans-serif; font-size:14px; }
+      header { position:sticky; top:0; z-index:5; background:rgba(245,247,251,.92); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
+      .wrap { max-width:1280px; margin:0 auto; padding:18px 22px; }
+      .top { display:flex; justify-content:space-between; align-items:center; gap:16px; }
+      h1 { margin:0; font-size:28px; letter-spacing:-.045em; }
+      h2 { margin:0 0 10px; font-size:18px; letter-spacing:-.02em; }
+      p { margin:0; color:var(--muted); line-height:1.55; }
+      a { color:var(--blue); text-decoration:none; }
+      button { border:1px solid var(--line); background:var(--panel); color:var(--ink); border-radius:10px; padding:10px 13px; cursor:pointer; font-weight:700; }
+      button.primary { border:0; background:var(--blue); color:white; }
+      button.green { border:0; background:var(--green); color:white; }
+      button:disabled { opacity:.55; cursor:not-allowed; }
+      .grid { display:grid; gap:14px; }
+      .two { grid-template-columns:1fr 1fr; }
+      .three { grid-template-columns:repeat(3,minmax(0,1fr)); }
+      .four { grid-template-columns:repeat(4,minmax(0,1fr)); }
+      .card { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:16px; box-shadow:0 12px 34px rgba(15,23,42,.05); }
+      .metric { font-size:30px; font-weight:900; letter-spacing:-.05em; margin-top:4px; }
+      .blue { color:var(--blue); } .red { color:var(--red); } .yellow { color:var(--yellow); } .green { color:var(--green); }
+      label { display:grid; gap:6px; color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; }
+      input, textarea, select { width:100%; border:1px solid var(--line); border-radius:12px; background:#fbfdff; color:var(--ink); padding:11px 12px; font:inherit; }
+      textarea { min-height:190px; resize:vertical; line-height:1.55; }
+      table { width:100%; border-collapse:collapse; }
+      th,td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+      th { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
+      .pill { display:inline-flex; align-items:center; padding:4px 9px; border-radius:999px; font-size:12px; border:1px solid var(--line); color:var(--muted); }
+      .pill.high { color:var(--red); background:#fff1f2; border-color:#fecdd3; }
+      .pill.medium { color:var(--yellow); background:#fffbeb; border-color:#fde68a; }
+      .pill.low { color:var(--green); background:#f0fdf4; border-color:#bbf7d0; }
+      .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+      .split { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; }
+      .small { font-size:12px; color:var(--muted); }
+      pre { white-space:pre-wrap; margin:0; background:#0b1118; color:#e7f2ff; border-radius:14px; padding:14px; max-height:520px; overflow:auto; line-height:1.55; }
+      .notice { background:var(--soft); border:1px solid #bae6fd; color:#075985; border-radius:14px; padding:12px 14px; }
+      .stack { display:grid; gap:10px; }
+      @media (max-width:900px){ .two,.three,.four{grid-template-columns:1fr;} .top,.split{display:grid;} }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="wrap top">
+        <div>
+          <h1>CallControl AI Workspace</h1>
+          <p>Self-service MVP: загрузка транскрипта, быстрый AI-score, список звонков и mini-audit report.</p>
+        </div>
+        <div class="row">
+          <a href="/">Landing</a>
+          <a href="/platform/">Platform demo</a>
+          <a href="/admin.html">Operator admin</a>
+          <a href="/api/export/state.json" id="exportLink">Export</a>
+          <button id="refresh">Обновить</button>
+          <button class="green" id="reportBtn">Сгенерировать отчет</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="wrap grid" style="padding-top:18px">
+      <section class="notice">
+        Это рабочий self-service контур для MVP. Пока без настоящей регистрации и оплаты: клиент может вставить транскрипт, увидеть анализ и получить отчет, а ты в админке видишь те же данные.
+      </section>
+
+      <section class="grid four" id="kpis"></section>
+
+      <section class="grid two">
+        <div class="card">
+          <h2>Тариф и лимиты</h2>
+          <div id="usageBox" class="stack"><p>Загрузка...</p></div>
+        </div>
+        <div class="card">
+          <h2>Выбрать пакет</h2>
+          <div id="plansBox" class="stack"><p>Загрузка...</p></div>
+        </div>
+      </section>
+
+      <section class="grid two">
+        <div class="card">
+          <h2>Настройки компании</h2>
+          <form id="workspaceForm" class="grid">
+            <label>Компания<input name="company" id="companyInput" placeholder="Название компании" /></label>
+            <label>Ниша<select name="industry" id="industryInput"><option value="sales">Продажи</option><option value="support">Клиент-сервис</option><option value="real_estate">Недвижимость</option><option value="edtech">EdTech</option><option value="auto">Авто</option></select></label>
+            <label>Менеджеры<textarea name="managersText" id="managersInput" style="min-height:96px" placeholder="Иван&#10;Мария&#10;Дмитрий"></textarea></label>
+            <button class="primary" type="submit">Сохранить workspace</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Кастомный чек-лист</h2>
+          <form id="checklistForm" class="grid">
+            <label>Название<input name="name" placeholder="Например: Контроль отдела продаж" /></label>
+            <label>Критерии<textarea name="criteriaText" style="min-height:96px" placeholder="Приветствие&#10;Выявление боли&#10;Бюджет&#10;Возражение дорого&#10;Следующий шаг"></textarea></label>
+            <button type="submit">Добавить чек-лист</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="grid two">
+        <div class="card">
+          <h2>Команда и доступы</h2>
+          <div id="usersBox" class="stack"><p>Загрузка...</p></div>
+        </div>
+        <div class="card">
+          <h2>Пригласить пользователя</h2>
+          <form id="inviteForm" class="grid">
+            <label>Email<input name="email" type="email" placeholder="manager@company.com" /></label>
+            <label>Роль<select name="role"><option value="member">Manager</option><option value="manager">ROP</option><option value="admin">Admin</option><option value="viewer">Viewer</option></select></label>
+            <button type="submit">Создать invite</button>
+          </form>
+          <div id="inviteResult" class="small" style="margin-top:10px"></div>
+          <form id="acceptInviteForm" class="grid" style="margin-top:14px">
+            <label>Принять invite token<input name="token" placeholder="token из ссылки" /></label>
+            <label>Имя<input name="name" placeholder="Имя пользователя" /></label>
+            <button type="submit">Принять invite</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="grid two">
+        <div class="card">
+          <div class="split">
+            <div>
+              <h2>Добавить звонок</h2>
+              <p>Лучше всего вставлять транскрипт. Аудио на этом этапе можно расшифровать отдельно и вставить текстом.</p>
+            </div>
+            <span class="pill">до 15 мин</span>
+          </div>
+          <form id="callForm" class="grid" style="margin-top:14px">
+            <label>Менеджер<select name="managerId" id="managerSelect"></select></label>
+            <label>Название звонка<input name="title" placeholder="Например: Мария · клиент сказал дорого" required /></label>
+            <label>Транскрипт<textarea name="transcript" required placeholder="Client: Цена кажется дорогой...&#10;Manager: Понимаю, тогда подумайте..."></textarea></label>
+            <button class="primary" type="submit">Добавить и проанализировать</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Последний результат</h2>
+          <div id="lastResult" class="grid">
+            <p>Пока нет нового анализа. Добавь транскрипт или загрузи demo calls в админке.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="split">
+          <div>
+            <h2>Мои звонки</h2>
+            <p>Здесь виден минимум, который нужен клиенту в MVP: score, risk, теги, причина и действие.</p>
+          </div>
+          <div class="row">
+            <input id="searchInput" placeholder="Поиск: дорого, конкурент, подумаю" style="min-width:260px" />
+            <button id="searchBtn">Найти</button>
+            <button id="loadDemo">Загрузить 50 demo calls</button>
+          </div>
+        </div>
+        <div style="overflow:auto;margin-top:12px">
+          <table>
+            <thead><tr><th>Звонок</th><th>Менеджер</th><th>Score</th><th>Risk</th><th>Tags</th><th>Что исправить</th></tr></thead>
+            <tbody id="callsRows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="grid two">
+        <div class="card">
+          <h2>Отчеты</h2>
+          <table>
+            <thead><tr><th>Отчет</th><th>Score</th><th>Value</th><th>Ссылки</th></tr></thead>
+            <tbody id="reportsRows"></tbody>
+          </table>
+        </div>
+        <div class="card">
+          <h2>Preview отчета</h2>
+          <pre id="reportPreview">Пока отчет не сгенерирован.</pre>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      let state = null;
+
+      async function api(path, options) {
+        const pin = localStorage.getItem("callcontrol_app_pin") || "";
+        const headers = { ...(options?.headers || {}) };
+        if (pin) headers["X-App-Pin"] = pin;
+        const response = await fetch(path, { ...(options || {}), headers });
+        if (response.status === 401) {
+          const nextPin = prompt("Введите APP_PIN");
+          if (nextPin) {
+            localStorage.setItem("callcontrol_app_pin", nextPin);
+            return api(path, options);
+          }
+        }
+        if (!response.ok) throw new Error(await response.text());
+        return response.json();
+      }
+
+      function managerName(id) {
+        return state?.managers?.find((manager) => manager.id === id)?.name || id;
+      }
+
+      async function load() {
+        const [dashboard, stateResponse] = await Promise.all([api("/api/dashboard"), api("/api/state")]);
+        state = stateResponse.state;
+        hydrateWorkspace();
+        renderKpis(dashboard.dashboard);
+        renderManagers(state.managers || []);
+        renderCalls(state.calls || []);
+        renderReports(state.reports || []);
+        renderReport((state.reports || [])[0]);
+        renderUsage(state.subscription, state.invoices || []);
+        renderUsers(state.users || [], state.invites || []);
+        await loadPlans();
+      }
+
+      function renderKpis(data) {
+        document.querySelector("#kpis").innerHTML = [
+          ["Звонков", data.callsTotal, "blue"],
+          ["Проанализировано", data.callsAnalyzed, "green"],
+          ["High risk", data.highRiskCalls, "red"],
+          ["Value at Risk", "$" + data.valueAtRisk, "red"]
+        ].map(([label, value, color]) => `<div class="card"><p>${label}</p><div class="metric ${color}">${value}</div></div>`).join("");
+      }
+
+      function renderUsage(subscription, invoices) {
+        const sub = subscription || {};
+        const limit = sub.minutesLimit ?? 75;
+        const used = sub.minutesUsed ?? 0;
+        const remaining = limit === null ? "без лимита" : Math.max(0, Math.round((limit - used) * 10) / 10);
+        const latestInvoice = invoices[0];
+        document.querySelector("#usageBox").innerHTML = `
+          <div class="metric blue">${used}/${limit ?? "∞"} мин</div>
+          <p>План: <strong>${sub.plan || "demo"}</strong> · статус: <strong>${sub.status || "trial"}</strong></p>
+          <p>Осталось: <strong>${remaining}</strong></p>
+          ${latestInvoice ? `<p class="small">Последний invoice: ${latestInvoice.planName} · ${latestInvoice.status}</p>` : `<p class="small">Инвойсов пока нет.</p>`}
+        `;
+      }
+
+      async function loadPlans() {
+        const result = await api("/api/billing/plans");
+        document.querySelector("#plansBox").innerHTML = result.plans.map((plan) => `
+          <div class="card" style="box-shadow:none;padding:12px">
+            <div class="split">
+              <div>
+                <strong>${plan.name}</strong>
+                <p class="small">${plan.description}</p>
+                <p class="small">${plan.callsLimit || "инд."} звонков · ${plan.minutesLimit || "инд."} минут</p>
+              </div>
+              <button data-plan="${plan.id}">${plan.priceUsd === null ? "Запросить" : "$" + plan.priceUsd}</button>
+            </div>
+          </div>
+        `).join("");
+        document.querySelectorAll("[data-plan]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            await api("/api/billing/checkout", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ planId: button.dataset.plan })
+            });
+            await load();
+          });
+        });
+      }
+
+      function renderManagers(managers) {
+        document.querySelector("#managerSelect").innerHTML = managers.map((manager) => `<option value="${manager.id}">${manager.name}</option>`).join("");
+      }
+
+      function renderUsers(users, invites) {
+        document.querySelector("#usersBox").innerHTML = `
+          ${users.map((user) => `
+            <div class="split" style="border-bottom:1px solid var(--line);padding-bottom:8px">
+              <div><strong>${user.name}</strong><p class="small">${user.email || ""}</p></div>
+              <span class="pill">${user.role}</span>
+            </div>
+          `).join("") || "<p>Пользователей пока нет.</p>"}
+          <div class="small">${invites.filter((invite) => invite.status === "pending").length} pending invite(s)</div>
+        `;
+      }
+
+      function hydrateWorkspace() {
+        const org = state?.organization || {};
+        document.querySelector("#companyInput").value = org.name || "";
+        document.querySelector("#industryInput").value = org.industry || "sales";
+        document.querySelector("#managersInput").value = (state?.managers || []).map((manager) => manager.name).join("\n");
+      }
+
+      function renderCalls(calls) {
+        document.querySelector("#callsRows").innerHTML = calls.length ? calls.slice(0, 50).map((call) => `
+          <tr>
+            <td><strong>${call.title}</strong><p class="small">${call.summary || ""}</p></td>
+            <td>${managerName(call.managerId)}</td>
+            <td><strong>${call.score ?? "-"}</strong></td>
+            <td><span class="pill ${call.riskLevel}">${call.riskLevel}</span></td>
+            <td>${(call.tags || []).join(", ")}</td>
+            <td>${(call.actionItems || []).slice(0, 2).join("; ")}</td>
+          </tr>
+        `).join("") : `<tr><td colspan="6"><p>Звонков пока нет.</p></td></tr>`;
+      }
+
+      function renderReports(reports) {
+        document.querySelector("#reportsRows").innerHTML = reports.length ? reports.map((report) => `
+          <tr>
+            <td>${report.title}<p class="small">${report.createdAt || ""}</p></td>
+            <td>${report.score ?? "-"}</td>
+            <td>$${report.valueAtRisk ?? 0}</td>
+            <td><a href="/api/reports/${report.id}.html" target="_blank">html</a> · <a href="/api/reports/${report.id}.md" target="_blank">md</a></td>
+          </tr>
+        `).join("") : `<tr><td colspan="4"><p>Отчетов пока нет.</p></td></tr>`;
+      }
+
+      function renderReport(report) {
+        document.querySelector("#reportPreview").textContent = report?.markdown || "Пока отчет не сгенерирован.";
+      }
+
+      function renderLast(call) {
+        document.querySelector("#lastResult").innerHTML = `
+          <div class="metric ${call.riskLevel === "high" ? "red" : call.riskLevel === "medium" ? "yellow" : "green"}">${call.score}/100</div>
+          <p><strong>${call.title}</strong></p>
+          <p>${call.summary || ""}</p>
+          <p><span class="pill ${call.riskLevel}">${call.riskLevel}</span></p>
+          <p class="small">${(call.actionItems || []).join("; ")}</p>
+        `;
+      }
+
+      document.querySelector("#refresh").addEventListener("click", load);
+      document.querySelector("#exportLink").addEventListener("click", (event) => {
+        const pin = localStorage.getItem("callcontrol_app_pin") || "";
+        if (pin) event.currentTarget.href = `/api/export/state.json?pin=${encodeURIComponent(pin)}`;
+      });
+      document.querySelector("#workspaceForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+        await api("/api/workspace", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        await load();
+      });
+      document.querySelector("#checklistForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+        await api("/api/checklists", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        event.currentTarget.reset();
+        await load();
+      });
+      document.querySelector("#inviteForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+        const result = await api("/api/invites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        document.querySelector("#inviteResult").textContent = `Invite: ${location.origin}${result.inviteUrl}`;
+        event.currentTarget.reset();
+        await load();
+      });
+      document.querySelector("#acceptInviteForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+        await api("/api/invites/accept", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        event.currentTarget.reset();
+        await load();
+      });
+      document.querySelector("#loadDemo").addEventListener("click", async () => {
+        await api("/api/demo/load-legacy-seed", { method: "POST" });
+        await load();
+      });
+      document.querySelector("#searchBtn").addEventListener("click", async () => {
+        const q = document.querySelector("#searchInput").value;
+        const result = await api(`/api/search?q=${encodeURIComponent(q)}`);
+        renderCalls(result.calls || []);
+      });
+      document.querySelector("#searchInput").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") document.querySelector("#searchBtn").click();
+      });
+      const inviteToken = new URLSearchParams(location.search).get("invite");
+      if (inviteToken) {
+        document.querySelector("#acceptInviteForm [name='token']").value = inviteToken;
+        document.querySelector("#acceptInviteForm").scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      document.querySelector("#reportBtn").addEventListener("click", async () => {
+        const result = await api("/api/reports/mini-audit", { method: "POST" });
+        renderReport(result.report);
+        await load();
+      });
+      document.querySelector("#callForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const button = event.currentTarget.querySelector("button");
+        button.disabled = true;
+        button.textContent = "Анализируем...";
+        try {
+          const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+          const created = await api("/api/calls", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          const analyzed = await api(`/api/calls/${created.call.id}/analyze`, { method: "POST" });
+          renderLast(analyzed.call);
+          event.currentTarget.reset();
+          await load();
+        } finally {
+          button.disabled = false;
+          button.textContent = "Добавить и проанализировать";
+        }
+      });
+
+      load().catch((error) => {
+        document.body.insertAdjacentHTML("afterbegin", `<pre>${error.message}</pre>`);
+      });
+    </script>
+  </body>
+</html>

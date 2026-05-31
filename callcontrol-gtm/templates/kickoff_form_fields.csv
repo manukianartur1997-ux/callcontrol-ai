@@ -1,0 +1,20 @@
+section,field_label,helper_text,field_type,required,options
+Company basics,Company / school,How should we name the school in the report?,short_text,yes,
+Company basics,Website,Main website or landing page,url,yes,
+Company basics,Course directions,What products/courses do you sell?,long_text,yes,
+Sales context,Average deal value,Use your working currency,short_text,yes,
+Sales context,Currency,,single_select,yes,"USD;EUR;UAH"
+Sales context,Leads per month,Approximate is enough,number,no,
+Sales context,Sales/admissions team size,How many managers handle calls?,number,yes,
+Sales context,Current lead-to-payment conversion,Percent if known,short_text,no,
+Lead sources,Lead sources,Where leads come from,multi_select,yes,"Meta Ads;Google Ads;Referrals;Organic;Partners;Other"
+Call data,Where are calls stored?,We need this to understand access,single_select,yes,"CRM;IP telephony;Cloud drive;Messenger;Not recording yet;Other"
+Call data,CRM name,For example amoCRM Bitrix24 KeyCRM HubSpot,short_text,no,
+Call data,Telephony name,For example Binotel Ringostat Stream Phonet,short_text,no,
+Call data,Call files / transcripts link,Google Drive Dropbox or other link,long_text,no,
+Audit focus,Main question for the audit,What do you most want to understand?,long_text,yes,
+Audit focus,Known concerns,For example weak objections no follow-up poor lead quality,long_text,no,
+Privacy,Sensitive data limitations,What should not be included in the report?,long_text,no,
+Contact,Main contact,Email or Telegram,short_text,yes,
+Permission,Data permission confirmation,Client confirms they have the right to share these records for analysis,checkbox,yes,"I confirm"
+

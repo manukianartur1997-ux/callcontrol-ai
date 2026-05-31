@@ -1,1 +1,15 @@
-{"name":"callcontrol-ai","version":"0.1.0","private":true,"scripts":{"build":"node build-pages.js","deploy":"wrangler deploy"},"engines":{"node":">=20"}}
+{
+  "name": "callcontrol-ai-demo-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tiny local backend for CallControl AI demo lead capture.",
+  "scripts": {
+    "build": "node build-pages.js",
+    "start": "node server.js",
+    "smoke": "node scripts/smoke-check.js",
+    "check": "node --check server.js && node --input-type=module --check < functions/api/leads.js && node --check cloudflare/src/worker.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

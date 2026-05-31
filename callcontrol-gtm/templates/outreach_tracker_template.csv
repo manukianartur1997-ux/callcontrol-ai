@@ -1,0 +1,3 @@
+company,category,buyer_name,role,channel,status,last_touch_date,next_action,next_action_date,reply_received,call_booked,result,fit_score,trigger_score,priority_score,personalization_line,notes
+Example School,IT / coding,[Name],Head of Sales,LinkedIn,New,,First touch,,no,no,Pending,5,4,9,"Saw you are hiring sales managers; likely admissions calls are scaling.","Replace this row with real leads"
+

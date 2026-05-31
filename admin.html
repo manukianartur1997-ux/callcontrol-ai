@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CallControl AI Admin</title>
+    <style>
+      :root { --bg:#0b1118; --card:#111a24; --line:#263746; --text:#eef6ff; --muted:#93a6b8; --blue:#38bdf8; --red:#fb7185; --yellow:#f59e0b; --green:#22c55e; }
+      * { box-sizing:border-box; }
+      body { margin:0; background:var(--bg); color:var(--text); font-family:Inter, system-ui, sans-serif; font-size:14px; }
+      main { max-width:1280px; margin:0 auto; padding:22px; }
+      header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:18px; }
+      h1 { margin:0 0 6px; font-size:32px; letter-spacing:-0.04em; }
+      h2 { margin:0 0 10px; font-size:17px; }
+      p { margin:0; color:var(--muted); line-height:1.55; }
+      button { border:1px solid var(--line); background:rgba(255,255,255,.03); color:var(--text); border-radius:8px; padding:10px 12px; cursor:pointer; }
+      button.primary { background:var(--blue); color:#061018; border:0; font-weight:800; }
+      .grid { display:grid; gap:14px; }
+      .kpis { grid-template-columns:repeat(5,minmax(0,1fr)); }
+      .two { grid-template-columns:1fr 1fr; }
+      .card { border:1px solid var(--line); background:var(--card); border-radius:10px; padding:14px; }
+      .metric { font-size:28px; font-weight:900; letter-spacing:-.05em; margin-top:5px; }
+      .blue { color:var(--blue); } .red { color:var(--red); } .yellow { color:var(--yellow); } .green { color:var(--green); }
+      table { width:100%; border-collapse:collapse; }
+      th,td { padding:9px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+      th { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.08em; }
+      tr:last-child td { border-bottom:0; }
+      .pill { display:inline-flex; padding:4px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted); font-size:12px; }
+      .pill.high { color:var(--red); border-color:rgba(251,113,133,.35); background:rgba(251,113,133,.1); }
+      .pill.medium { color:var(--yellow); border-color:rgba(245,158,11,.35); background:rgba(245,158,11,.1); }
+      .pill.low { color:var(--green); border-color:rgba(34,197,94,.35); background:rgba(34,197,94,.1); }
+      textarea,input,select { width:100%; border:1px solid var(--line); border-radius:8px; background:#0c141d; color:var(--text); padding:9px 10px; font:inherit; }
+      textarea { min-height:110px; resize:vertical; }
+      label { display:grid; gap:5px; color:var(--muted); }
+      form { display:grid; gap:10px; }
+      pre { white-space:pre-wrap; background:#081018; border:1px solid var(--line); border-radius:8px; padding:12px; color:#d7e6f5; max-height:420px; overflow:auto; }
+      @media (max-width:900px){ .kpis,.two{grid-template-columns:1fr;} header{display:grid;} }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>CallControl AI Admin</h1>
+          <p>Операторский экран для заявок, звонков, mock AI-анализа и mini-audit отчета.</p>
+        </div>
+        <div>
+          <button class="primary" id="refresh">Обновить</button>
+          <a href="/" style="color:var(--blue);display:inline-flex;padding:10px 0">Landing</a>
+          <a href="/platform/" style="color:var(--blue);display:inline-flex;padding:10px 0">Platform demo</a>
+          <a href="/client.html" style="color:var(--blue);display:inline-flex;padding:10px 0">Client MVP</a>
+          <a href="/api/leads.csv" style="color:var(--blue);display:inline-flex;padding:10px 0">Export leads</a>
+          <button id="loadLegacy">Загрузить 50 demo calls</button>
+          <button id="resetDemo">Сбросить demo</button>
+          <button id="analyzePending">Анализ pending</button>
+          <button id="generateReport">Сгенерировать mini-audit</button>
+        </div>
+      </header>
+
+      <section class="grid kpis" id="kpis"></section>
+
+      <section class="grid two" style="margin-top:14px">
+        <div class="card">
+          <h2>Заявки</h2>
+          <table><thead><tr><th>Клиент</th><th>Компания</th><th>Контакт</th><th>Статус</th></tr></thead><tbody id="leadsRows"></tbody></table>
+        </div>
+        <div class="card">
+          <h2>Новый звонок / транскрипт</h2>
+          <form id="callForm">
+            <label>Менеджер<select name="managerId" id="managerSelect"></select></label>
+            <label>Название<input name="title" placeholder="Например: Мария · возражение дорого" /></label>
+            <label>Транскрипт<textarea name="transcript" required placeholder="Client: ...&#10;Manager: ..."></textarea></label>
+            <button class="primary" type="submit">Добавить и проанализировать</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="grid two" style="margin-top:14px">
+        <div class="card">
+          <h2>CSV import</h2>
+          <p style="margin-bottom:10px">Вставь CSV с колонками: call_id, manager_name, duration_seconds, transcript. <a href="/sample-import.csv" target="_blank" style="color:var(--blue)">Открыть пример</a></p>
+          <textarea id="csvInput" placeholder="call_id,manager_name,duration_seconds,transcript&#10;call_1,Anna,240,&quot;Manager: ... Client: ...&quot;"></textarea>
+          <button class="primary" id="importCsv" style="margin-top:10px">Импортировать и проанализировать</button>
+        </div>
+        <div class="card">
+          <h2>История отчетов</h2>
+          <table><thead><tr><th>Отчет</th><th>Score</th><th>Value</th><th>Link</th></tr></thead><tbody id="reportsRows"></tbody></table>
+        </div>
+      </section>
+
+      <section class="card" style="margin-top:14px">
+        <h2>Звонки</h2>
+        <table><thead><tr><th>Звонок</th><th>Менеджер</th><th>Score</th><th>Risk</th><th>Tags</th><th>Action</th></tr></thead><tbody id="callsRows"></tbody></table>
+      </section>
+
+      <section class="card" style="margin-top:14px">
+        <h2>Последний отчет</h2>
+        <pre id="reportPreview">Пока отчет не сгенерирован.</pre>
+      </section>
+    </main>
+
+    <script>
+      let state = null;
+
+      async function api(path, options) {
+        const pin = localStorage.getItem("callcontrol_app_pin") || "";
+        const headers = { ...(options?.headers || {}) };
+        if (pin) headers["X-App-Pin"] = pin;
+        const res = await fetch(path, { ...(options || {}), headers });
+        if (res.status === 401) {
+          const nextPin = prompt("Введите APP_PIN");
+          if (nextPin) {
+            localStorage.setItem("callcontrol_app_pin", nextPin);
+            return api(path, options);
+          }
+        }
+        if (!res.ok) throw new Error(await res.text());
+        return res.json();
+      }
+
+      function managerName(id) {
+        return state?.managers?.find((manager) => manager.id === id)?.name || id;
+      }
+
+      async function load() {
+        const [dashboard, stateResponse] = await Promise.all([
+          api("/api/dashboard"),
+          api("/api/state")
+        ]);
+        state = stateResponse.state;
+        renderKpis(dashboard.dashboard);
+        renderLeads(state.leads || []);
+        renderManagers(state.managers || []);
+        renderCalls(state.calls || []);
+        renderReports(state.reports || []);
+        renderReport((state.reports || [])[0]);
+      }
+
+      function renderKpis(data) {
+        document.querySelector("#kpis").innerHTML = [
+          ["Звонков", data.callsTotal, "blue"],
+          ["Средний score", data.averageScore || "-", "yellow"],
+          ["High risk", data.highRiskCalls, "red"],
+          ["Value at Risk", "$" + data.valueAtRisk, "red"],
+          ["Сэкономлено", data.timeSavedHours + "h", "green"]
+        ].map(([label, value, color]) => `<div class="card"><p>${label}</p><div class="metric ${color}">${value}</div></div>`).join("");
+      }
+
+      function renderLeads(leads) {
+        document.querySelector("#leadsRows").innerHTML = leads.length ? leads.map((lead) => `
+          <tr>
+            <td>${lead.name}<p>${lead.pain || ""}</p></td>
+            <td>${lead.company}<p>${lead.niche || ""}</p></td>
+            <td>${lead.contact}</td>
+            <td>
+              <select data-lead-status="${lead.id}">
+                ${["01_NEW","02_DATA_CHECK","03_PROCESSING","04_READY","05_SENT","06_FOLLOW_UP","07_CONVERTED","09_REJECTED"].map((status) => `<option ${lead.status === status ? "selected" : ""}>${status}</option>`).join("")}
+              </select>
+              <button data-lead-report="${lead.id}" style="margin-top:6px">Report</button>
+            </td>
+          </tr>
+        `).join("") : `<tr><td colspan="4"><p>Заявок пока нет.</p></td></tr>`;
+        document.querySelectorAll("[data-lead-status]").forEach((select) => {
+          select.addEventListener("change", async () => {
+            await api(`/api/leads/${select.dataset.leadStatus}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: select.value })
+            });
+            await load();
+          });
+        });
+        document.querySelectorAll("[data-lead-report]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const result = await api(`/api/leads/${button.dataset.leadReport}/report`, { method: "POST" });
+            renderReport(result.report);
+            await load();
+          });
+        });
+      }
+
+      function renderManagers(managers) {
+        document.querySelector("#managerSelect").innerHTML = managers.map((manager) => `<option value="${manager.id}">${manager.name}</option>`).join("");
+      }
+
+      function renderCalls(calls) {
+        document.querySelector("#callsRows").innerHTML = calls.map((call) => `
+          <tr>
+            <td><strong>${call.title}</strong><p>${call.summary || ""}</p></td>
+            <td>${managerName(call.managerId)}</td>
+            <td>${call.score ?? "-"}</td>
+            <td><span class="pill ${call.riskLevel}">${call.riskLevel}</span></td>
+            <td>${(call.tags || []).join(", ")}</td>
+            <td><button data-analyze="${call.id}">Analyze</button></td>
+          </tr>
+        `).join("");
+        document.querySelectorAll("[data-analyze]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            await api(`/api/calls/${button.dataset.analyze}/analyze`, { method: "POST" });
+            await load();
+          });
+        });
+      }
+
+      function renderReport(report) {
+        document.querySelector("#reportPreview").textContent = report?.markdown || "Пока отчет не сгенерирован.";
+      }
+
+      function renderReports(reports) {
+        document.querySelector("#reportsRows").innerHTML = reports.length ? reports.map((report) => `
+          <tr>
+            <td>${report.title}<p>${report.createdAt || ""}</p></td>
+            <td>${report.score ?? "-"}</td>
+            <td>$${report.valueAtRisk ?? 0}</td>
+            <td>
+              <a href="/api/reports/${report.id}.html" target="_blank" style="color:var(--blue)">html</a>
+              ·
+              <a href="/api/reports/${report.id}.md" target="_blank" style="color:var(--blue)">md</a>
+            </td>
+          </tr>
+        `).join("") : `<tr><td colspan="4"><p>Отчетов пока нет.</p></td></tr>`;
+      }
+
+      document.querySelector("#refresh").addEventListener("click", load);
+      document.querySelector("#loadLegacy").addEventListener("click", async () => {
+        await api("/api/demo/load-legacy-seed", { method: "POST" });
+        await load();
+      });
+      document.querySelector("#resetDemo").addEventListener("click", async () => {
+        if (!confirm("Сбросить звонки, заявки и отчеты к начальному demo-состоянию?")) return;
+        await api("/api/demo/reset", { method: "POST" });
+        await load();
+      });
+      document.querySelector("#generateReport").addEventListener("click", async () => {
+        const result = await api("/api/reports/mini-audit", { method: "POST" });
+        renderReport(result.report);
+        await load();
+      });
+      document.querySelector("#analyzePending").addEventListener("click", async () => {
+        await api("/api/jobs/analyze-pending", { method: "POST" });
+        await load();
+      });
+      document.querySelector("#importCsv").addEventListener("click", async () => {
+        await api("/api/calls/import-csv", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ csv: document.querySelector("#csvInput").value })
+        });
+        document.querySelector("#csvInput").value = "";
+        await load();
+      });
+      document.querySelector("#callForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+        const result = await api("/api/calls", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        await api(`/api/calls/${result.call.id}/analyze`, { method: "POST" });
+        event.currentTarget.reset();
+        await load();
+      });
+
+      load().catch((error) => {
+        document.body.insertAdjacentHTML("afterbegin", `<pre>${error.message}</pre>`);
+      });
+    </script>
+  </body>
+</html>

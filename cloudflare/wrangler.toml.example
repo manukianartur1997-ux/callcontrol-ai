@@ -1,0 +1,25 @@
+name = "callcontrol-ai-api"
+main = "src/worker.js"
+compatibility_date = "2026-05-12"
+
+[vars]
+DEFAULT_ORG_ID = "org_demo"
+ADMIN_TOKEN = "replace-me"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "callcontrol-ai"
+database_id = "replace-with-cloudflare-d1-id"
+
+[[r2_buckets]]
+binding = "AUDIO_BUCKET"
+bucket_name = "callcontrol-audio"
+
+[[queues.producers]]
+binding = "ANALYSIS_QUEUE"
+queue = "callcontrol-analysis"
+
+[[queues.consumers]]
+queue = "callcontrol-analysis"
+max_batch_size = 10
+max_batch_timeout = 30

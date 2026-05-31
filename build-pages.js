@@ -1,14 +1,64 @@
-const fs = require('fs');
-const path = require('path');
-const out = path.join(__dirname, 'dist');
-fs.rmSync(out, { recursive: true, force: true });
-fs.mkdirSync(out, { recursive: true });
-fs.mkdirSync(path.join(out, 'platform'), { recursive: true });
-const css = `:root{color-scheme:dark;--bg:#07111f;--panel:#0f1b2d;--line:#284159;--text:#f8fafc;--muted:#9fb2c8;--blue:#38bdf8;--green:#22c55e}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 10% 0%,#12365a 0,#07111f 38%,#020617 100%);color:var(--text);font-family:Inter,system-ui,sans-serif}a{color:inherit}.wrap{width:min(1120px,calc(100% - 32px));margin:0 auto}.top{position:sticky;top:0;z-index:5;backdrop-filter:blur(14px);background:rgba(2,6,23,.76);border-bottom:1px solid rgba(255,255,255,.1)}.nav{min-height:70px;display:flex;align-items:center;justify-content:space-between;gap:16px}.brand{text-decoration:none;font-weight:800}.links{display:flex;gap:10px;flex-wrap:wrap}.links a,.btn{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:10px 14px;border:1px solid rgba(255,255,255,.16);border-radius:10px;text-decoration:none;background:rgba(255,255,255,.06);font-weight:700}.btn.primary{border-color:rgba(56,189,248,.55);background:linear-gradient(135deg,#38bdf8,#4f46e5)}section{padding:72px 0}.hero h1{max-width:860px;margin:0;font-size:clamp(42px,7vw,82px);line-height:.98;letter-spacing:-.04em}.lead{max-width:760px;margin:22px 0 0;color:var(--muted);font-size:20px;line-height:1.55}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.card{border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.07);border-radius:14px;padding:20px;text-decoration:none}.card small{color:var(--blue);font-weight:800}.card h3{margin:12px 0 8px;font-size:22px}.card p{margin:0;color:var(--muted);line-height:1.5}.panel{border:1px solid rgba(255,255,255,.13);background:rgba(255,255,255,.07);border-radius:16px;padding:24px}input,textarea{width:100%;margin-top:7px;border:1px solid rgba(255,255,255,.16);border-radius:10px;background:#07111f;color:var(--text);padding:12px;font:inherit}label{display:grid;margin-top:12px;color:var(--muted);font-weight:700}.status{margin-top:14px;color:var(--muted)}@media(max-width:820px){.grid{grid-template-columns:1fr}.nav{align-items:flex-start;flex-direction:column;padding:14px 0}.hero h1{font-size:42px}}`;
-function page(title, body){return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>${css}</style></head><body><header class="top"><div class="wrap nav"><a class="brand" href="/">CallControl AI</a><nav class="links"><a href="/platform/">Platform demo</a><a href="/client.html">Client workspace</a><a href="/admin.html">Operator admin</a><a href="/#request">Request audit</a></nav></div></header>${body}</body></html>`}
-const landing = page('CallControl AI — sales call audit', `<main><section class="hero"><div class="wrap"><h1>Sales call audit for teams that leak money in conversations.</h1><p class="lead">CallControl AI finds where paid leads are lost in sales calls, shows quotes and timestamps, and turns them into a practical audit report.</p><div class="actions"><a class="btn primary" href="#request">Request audit</a><a class="btn" href="/platform/">Platform demo</a><a class="btn" href="/client.html">Client workspace</a><a class="btn" href="/admin.html">Operator admin</a></div></div></section><section><div class="wrap"><h2>Demo system map</h2><div class="grid"><a class="card" href="/"><small>01</small><h3>Public landing</h3><p>Offer, lead form, and entry point into all demo layers.</p></a><a class="card" href="/platform/"><small>02</small><h3>Platform demo</h3><p>Owner, ROP and Manager product views.</p></a><a class="card" href="/client.html"><small>03</small><h3>Client workspace</h3><p>Client-side MVP for transcripts, analysis and reports.</p></a><a class="card" href="/admin.html"><small>04</small><h3>Operator admin</h3><p>Internal workflow for leads, calls and mini-audits.</p></a></div></div></section><section id="request"><div class="wrap"><div class="panel"><h2>Request audit</h2><form id="leadForm"><label>Name<input name="name" required></label><label>Telegram or email<input name="contact" required></label><label>Company<input name="company" required></label><label>What should we find?<textarea name="pain"></textarea></label><button class="btn primary" type="submit" style="margin-top:16px">Send request</button><div class="status" id="status"></div></form></div></div></section></main><script>leadForm.addEventListener('submit',async e=>{e.preventDefault();status.textContent='Sending...';const body=Object.fromEntries(new FormData(leadForm).entries());body.source='callcontrol-github-live';try{const r=await fetch('/api/leads',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});status.textContent=r.ok?'Request received. I will reply during the business day.':'Could not send request.';if(r.ok)leadForm.reset()}catch(_){status.textContent='Could not send request.'}})</script>`);
-const platform = page('CallControl AI — Platform demo', `<main><section><div class="wrap"><h1>Platform demo</h1><p class="lead">Clickable product layer: Value at Risk, risk calls, manager ranking and daily ROP queue.</p><div class="grid"><div class="card"><small>Value at Risk</small><h3>$147,400</h3><p>Revenue under risk across audited calls.</p></div><div class="card"><small>Top risk</small><h3>Price objection</h3><p>18 calls where price appears before value.</p></div><div class="card"><small>Manager ranking</small><h3>5 roles</h3><p>Owner, ROP and Manager see different levels.</p></div><div class="card"><small>Evidence</small><h3>Quotes + timestamps</h3><p>Each finding is grounded in call evidence.</p></div></div></div></section></main>`);
-const client = page('CallControl AI — Client workspace', `<main><section><div class="wrap"><h1>Client workspace</h1><p class="lead">MVP client area for uploading transcripts, seeing risk tags and generating a mini-audit report.</p><div class="panel"><label>Transcript<textarea placeholder="Client: price is high...\nManager: then think about it..."></textarea></label><button class="btn primary" style="margin-top:16px">Analyze transcript</button></div></div></section></main>`);
-const admin = page('CallControl AI — Operator admin', `<main><section><div class="wrap"><h1>Operator admin</h1><p class="lead">Internal workspace for leads, call import, mock analysis and report delivery.</p><div class="grid"><div class="card"><small>Leads</small><h3>01_NEW</h3><p>Incoming audit requests.</p></div><div class="card"><small>Calls</small><h3>Import CSV</h3><p>Manual transcript intake.</p></div><div class="card"><small>Reports</small><h3>Mini-audit</h3><p>Generate markdown/html report.</p></div><div class="card"><small>Export</small><h3>CSV/JSON</h3><p>Operational handoff.</p></div></div></div></section></main>`);
-fs.writeFileSync(path.join(out,'index.html'), landing);fs.writeFileSync(path.join(out,'platform/index.html'), platform);fs.writeFileSync(path.join(out,'client.html'), client);fs.writeFileSync(path.join(out,'admin.html'), admin);fs.writeFileSync(path.join(out,'_headers'), '/*\n  X-Frame-Options: DENY\n');
-console.log('Built dist');
+const fs = require("fs");
+const path = require("path");
+
+const root = __dirname;
+const outDir = path.join(root, "dist");
+
+const files = [
+  "admin.html",
+  "client.html",
+  "online-leads.html",
+  "mini-audit-template.html",
+  "sample-import.csv",
+  "README.md",
+  "PUBLISH_NOW.md",
+  "DEPLOYMENT_CHECKLIST.md",
+  "_headers"
+];
+
+function copyDir(sourceDir, targetDir) {
+  if (!fs.existsSync(sourceDir)) return;
+  fs.mkdirSync(targetDir, { recursive: true });
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    const source = path.join(sourceDir, entry.name);
+    const target = path.join(targetDir, entry.name);
+    if (entry.isDirectory()) {
+      copyDir(source, target);
+    } else {
+      fs.copyFileSync(source, target);
+    }
+  }
+}
+
+fs.rmSync(outDir, { recursive: true, force: true });
+fs.mkdirSync(outDir, { recursive: true });
+
+for (const file of files) {
+  const source = path.join(root, file);
+  if (!fs.existsSync(source)) continue;
+  fs.copyFileSync(source, path.join(outDir, file));
+}
+
+const legacySource = path.join(root, "index.html");
+if (fs.existsSync(legacySource)) {
+  fs.copyFileSync(legacySource, path.join(outDir, "legacy-demo.html"));
+}
+
+require("./generate-public-landing-live")();
+
+copyDir(path.join(root, "platform"), path.join(outDir, "platform"));
+
+function injectPlatformLink(file) {
+  const fullPath = path.join(outDir, file);
+  if (!fs.existsSync(fullPath)) return;
+  const html = fs.readFileSync(fullPath, "utf8");
+  if (html.includes("/platform/")) return;
+  const link = `<a href="/platform/" style="position:fixed;right:18px;bottom:18px;z-index:50;padding:11px 14px;border:1px solid rgba(148,163,184,.35);border-radius:999px;background:rgba(15,23,42,.9);color:#fff;text-decoration:none;font:600 13px Inter,system-ui,sans-serif;box-shadow:0 18px 45px rgba(0,0,0,.24)">Platform demo</a>`;
+  fs.writeFileSync(fullPath, html.replace("</body>", `${link}</body>`));
+}
+
+for (const file of ["index.html", "ru/index.html", "uk/index.html", "en/index.html"]) {
+  injectPlatformLink(file);
+}
+
+console.log(`Cloudflare Pages build ready: hybrid demo room -> dist/`);
