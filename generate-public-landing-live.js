@@ -5,6 +5,7 @@ const outDir = path.join(__dirname, "dist");
 const samples = {
   "edtech-ua-sample-report.md": "# CallControl AI — приклад структури звіту\n\n**Приклад структури, не реальний клієнт**\n\n## Короткий висновок\nEdTech-школа втрачає гроші на першому діагностичному дзвінку: ціна звучить до цінності, а наступний крок не фіксується.\n\n## Value at Risk\nРозрахунок у реальному звіті будується на ваших заявках, середньому чеку і конверсії.\n\n## Доказ із дзвінка\n> M-2: \"У нас курс коштує 14,500 грн.\"\n>\n> Клієнт: \"Зрозуміло, я подумаю.\"\n\n## План дій\n30 днів: виправити діагностику потреби і наступний крок.\n60 днів: тренувати слабкі патерни по менеджерах.\n90 днів: перевірити повторний зріз.\n",
   "b2b-saas-ru-sample-report.md": "# CallControl AI — пример структуры отчёта\n\n**Пример структуры, не реальный клиент**\n\n## Короткий вывод\nКоманда теряет сделки между квалификацией и демонстрацией: контекст теряется при передаче лида, а клиент повторяет один и тот же сценарий.\n\n## Value at Risk\nРасчёт строится от вашего среднего контракта, количества квалифицированных лидов и текущей конверсии в оплату.\n\n## Доказ из звонка\n> Менеджер: \"Расскажите, что хотели бы посмотреть?\"\n>\n> Клиент: \"Мы уже подробно объяснили это на прошлом звонке.\"\n\n## План действий\n1. Ввести шаблон передачи лида между ролями.\n2. Заменить обзор продукта на демонстрацию вокруг сценария клиента.\n3. Добавить оценку качества следующего шага.\n",
+  "b2b-saas-en-sample-report.md": "# CallControl AI — sample report structure\n\n**Sample structure, not a real client**\n\n## Executive summary\nThe team loses deals between qualification and demo: context is dropped during the lead handoff, and the client repeats the same story.\n\n## Value at Risk\nThe real report calculates this from your average contract value, the number of qualified leads, and your current close rate.\n\n## Call evidence\n> Manager: \"Tell me what you'd like to see?\"\n>\n> Client: \"We already explained this in detail on the last call.\"\n\n## Action plan\n1. Introduce a lead-handoff template between roles.\n2. Replace the generic product overview with a demo built around the client's scenario.\n3. Add a next-step quality score.\n",
 };
 
 const copy = {
@@ -65,7 +66,7 @@ Object.assign(copy.uk, {
 });
 
 Object.assign(copy.en, {
-  sampleFile: "/samples/b2b-saas-ru-sample-report.md",
+  sampleFile: "/samples/b2b-saas-en-sample-report.md",
   sampleMetrics: [["Revenue leak", "32-38%"], ["Manager ranking", "M-1...M-5"], ["Marketing vs Sales", "verdict"], ["Action plan", "30/60/90"]],
   cards: [["Executive summary", "One main conclusion and 3 priorities."], ["Value at Risk", "Estimated money impact of the detected gaps."], ["Call quotes", "Manager phrases and the reason they create risk."], ["Action plan", "What to fix in the first 30, 60, and 90 days."]],
   steps: [["01", "Request and short call", "We clarify the segment, call volume, and the main audit question."], ["02", "Recordings handoff", "You share recordings or transcripts via Drive or Dropbox. We can sign an NDA first."], ["03", "AI analysis and human review", "Each call is reviewed through a structured frame. Final findings are checked manually."], ["04", "PDF and review session", "You get the report and a practical review: what to fix first, who needs coaching, and what to discuss with the team."]],
@@ -347,7 +348,7 @@ textarea{min-height:108px;resize:vertical}
 .reveal{opacity:0;transform:translateY(16px);transition:opacity .6s cubic-bezier(.22,1,.36,1),transform .6s cubic-bezier(.22,1,.36,1)}
 .reveal.in{opacity:1;transform:none}
 @media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}.button:hover,.mini-card:hover,.step-card:hover,.tier-card:hover{transform:none}html{scroll-behavior:auto}}
-@media(max-width:980px){.hero-grid,.sample-layout,.pricing-grid{grid-template-columns:1fr}.hero-aside .report-shot,.sample-shot .report-shot{transform:none}.grid-4,.future-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.nav-links{display:none}.sample-shot{order:-1}}
+@media(max-width:980px){.hero-grid,.sample-layout,.pricing-grid{grid-template-columns:1fr}.hero-aside .report-shot,.sample-shot .report-shot{transform:none}.grid-4,.future-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.nav-links{gap:12px}.nav-links a:not(.nav-cta){display:none}.sample-shot{order:-1}}
 @media(max-width:640px){.wrap{width:min(100% - 28px,1180px)}.grid-4,.future-grid,.form-grid{grid-template-columns:1fr}.hero-stat-grid{grid-template-columns:1fr}.leak-row{grid-template-columns:1fr}.footer-inner{flex-direction:column}}`;
 }
 

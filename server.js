@@ -206,10 +206,10 @@ function normalizeLead(input) {
     callsPerMonth: String(input.callsPerMonth || input.calls_per_month || "").trim(),
     contact: String(input.contact || "").trim(),
     company: String(input.company || "").trim(),
-    site: String(input.site || "").trim(),
-    team: String(input.team || "").trim(),
+    site: String(input.site || input.website || "").trim(),
+    team: String(input.team || input.teamSize || "").trim(),
     pain: String(input.pain || "").trim(),
-    data: String(input.data || "").trim(),
+    data: String(input.data || input.dataLink || "").trim(),
     auditResultLink: String(input.auditResultLink || input.audit_result_link || "").trim(),
     keyInsight: String(input.keyInsight || input.key_insight || "").trim(),
     upsellTarget: String(input.upsellTarget || input.upsell_target || "").trim(),
@@ -217,7 +217,7 @@ function normalizeLead(input) {
     userAgent: String(input.userAgent || "").trim()
   };
 
-  const missing = ["name", "contact", "company", "site", "data"].filter((key) => !lead[key]);
+  const missing = ["name", "contact", "company"].filter((key) => !lead[key]);
   return { lead, missing };
 }
 
