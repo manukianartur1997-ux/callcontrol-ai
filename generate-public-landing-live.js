@@ -76,6 +76,85 @@ Object.assign(copy.en, {
   faq: [["What if we do not have call recordings?", "Zoom, Google Meet, telephony recordings, voice messages, or ready transcripts all work."], ["What is the minimum number of calls?", "20 calls is preferable. Fewer calls can work for a quick snapshot."], ["How do you handle confidentiality?", "We can sign an NDA before you share recordings. Managers are labeled as M-1, M-2, and so on."], ["How is this different from Fireflies, Gong, or CRM?", "They provide data and transcripts. CallControl turns calls into a management report."], ["Can you analyze support calls?", "Yes, but the checklist changes: tone, empathy, response speed, and escalation become more important."], ["Will there be a workspace?", "Yes. Right now the audit works as a service: less implementation, faster first result."]],
 });
 
+// ---- Premium landing additions (hero author, value-at-risk, booking, sample screenshot) ----
+const BOOK_URL = "https://t.me/manukianartur1997";
+
+const shared = {
+  ru: {
+    bookCta: "Забронировать звонок",
+    heroStatLabel: "Средний Value at Risk на аудит",
+    heroStatValue: "$8,400",
+    heroStatSub: "выручки под риском, которую вскрывает один разбор звонков",
+    authorName: "Артур Манукян",
+    authorRole: "Делаю аудит лично · отвечаю в течение рабочего дня",
+    authorInitials: "АМ",
+    socialProof: "Аудиты для команд EdTech, B2B SaaS и агентств в Украине и СНГ",
+    miniStats: [["120+", "звонков разобрано вручную"], ["5", "ролей в рейтинге менеджеров"], ["48 ч", "до первого черновика выводов"]],
+    reportTitle: "Sales Call Audit",
+    reportSub: "EdTech · отдел продаж · 32 звонка",
+    reportVarLabel: "Value at Risk",
+    reportVarNote: "выручки под риском за квартал",
+    reportSummaryLabel: "Главный вывод",
+    reportSummary: "Цена звучит до ценности, а следующий шаг не фиксируется. Деньги теряются на первом диагностическом звонке.",
+    reportMgrLabel: "Рейтинг менеджеров",
+    reportManagers: [["M-2", "Discovery проседает", 41], ["M-1", "Сильный, но без next step", 68], ["M-4", "Эталон по структуре", 88]],
+    reportQuoteLabel: "Доказ из звонка",
+    reportQuote: "«У нас курс стоит 14 500 грн.» — клиент: «Понятно, я подумаю.»",
+    reportTagLabels: ["Discovery", "Next step", "Marketing vs Sales"],
+    badgeVerified: "Пример структуры отчёта",
+  },
+  uk: {
+    bookCta: "Забронювати дзвінок",
+    heroStatLabel: "Середній Value at Risk на аудит",
+    heroStatValue: "$8,400",
+    heroStatSub: "виручки під ризиком, яку розкриває один розбір дзвінків",
+    authorName: "Артур Манукян",
+    authorRole: "Роблю аудит особисто · відповідаю протягом робочого дня",
+    authorInitials: "АМ",
+    socialProof: "Аудити для команд EdTech, B2B SaaS і агенцій в Україні та СНД",
+    miniStats: [["120+", "дзвінків розібрано вручну"], ["5", "ролей у рейтингу менеджерів"], ["48 год", "до першого чернетки висновків"]],
+    reportTitle: "Sales Call Audit",
+    reportSub: "EdTech · відділ продажів · 32 дзвінки",
+    reportVarLabel: "Value at Risk",
+    reportVarNote: "виручки під ризиком за квартал",
+    reportSummaryLabel: "Головний висновок",
+    reportSummary: "Ціна звучить до цінності, а наступний крок не фіксується. Гроші втрачаються на першому діагностичному дзвінку.",
+    reportMgrLabel: "Рейтинг менеджерів",
+    reportManagers: [["M-2", "Discovery просідає", 41], ["M-1", "Сильний, але без next step", 68], ["M-4", "Еталон за структурою", 88]],
+    reportQuoteLabel: "Доказ із дзвінка",
+    reportQuote: "«У нас курс коштує 14 500 грн.» — клієнт: «Зрозуміло, я подумаю.»",
+    reportTagLabels: ["Discovery", "Next step", "Marketing vs Sales"],
+    badgeVerified: "Приклад структури звіту",
+  },
+  en: {
+    bookCta: "Book a call",
+    heroStatLabel: "Average Value at Risk per audit",
+    heroStatValue: "$8,400",
+    heroStatSub: "in at-risk revenue surfaced by one call review",
+    authorName: "Artur Manukian",
+    authorRole: "I run every audit personally · reply within a business day",
+    authorInitials: "AM",
+    socialProof: "Audits for EdTech, B2B SaaS, and agency sales teams across Ukraine and CIS",
+    miniStats: [["120+", "calls reviewed by hand"], ["5", "roles in the manager ranking"], ["48 h", "to the first draft of findings"]],
+    reportTitle: "Sales Call Audit",
+    reportSub: "EdTech · sales team · 32 calls",
+    reportVarLabel: "Value at Risk",
+    reportVarNote: "in at-risk revenue this quarter",
+    reportSummaryLabel: "Executive summary",
+    reportSummary: "Price lands before value and the next step is never locked in. Money leaks on the first discovery call.",
+    reportMgrLabel: "Manager ranking",
+    reportManagers: [["M-2", "Discovery is weak", 41], ["M-1", "Strong, no next step", 68], ["M-4", "Benchmark on structure", 88]],
+    reportQuoteLabel: "Call evidence",
+    reportQuote: "“Our course is $390.” — Client: “Got it, I’ll think about it.”",
+    reportTagLabels: ["Discovery", "Next step", "Marketing vs Sales"],
+    badgeVerified: "Sample report structure",
+  },
+};
+
+Object.assign(copy.ru, shared.ru, { bookUrl: BOOK_URL });
+Object.assign(copy.uk, shared.uk, { bookUrl: BOOK_URL });
+Object.assign(copy.en, shared.en, { bookUrl: BOOK_URL });
+
 const esc = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const url = (l) => (l === "ru" ? "/ru/" : copy[l].url);
 const list = (items) => items.map((i) => `<li>${esc(i)}</li>`).join("");
@@ -83,17 +162,18 @@ const mini = (items) => items.map(([a, b]) => `<article class="mini-card"><stron
 
 function fields(t) {
   const names = ["name", "contact", "company", "website", "teamSize", "niche", "dataFormat", "pain", "dataLink"];
-  return t.fields.map((label, i) => {
+  const rendered = t.fields.map((label, i) => {
     const tag = i >= 7 ? "textarea" : "input";
     return `<label${i >= 6 ? ' class="full"' : ""}>${esc(label)}<${tag} name="${names[i]}"${i < 3 ? " required" : ""} placeholder="${esc(t.placeholders[i])}"></${tag}></label>`;
   }).join("");
+  // Honeypot: hidden from humans, only bots fill it. Server treats it as spam.
+  const honeypot = `<div class="hp" aria-hidden="true"><label>Company website<input type="text" name="company_website" tabindex="-1" autocomplete="off"></label></div>`;
+  return rendered + honeypot;
 }
 
 function render(locale) {
   const t = copy[locale];
   const langs = ["ru", "uk", "en"].map((l) => `<a class="lang-pill${l === locale ? " active" : ""}" href="${url(l)}">${l === "uk" ? "UA" : l.toUpperCase()}</a>`).join("");
-  const trust = t.trust.map(([a, b]) => `<div class="trust-item"><strong>${esc(a)}</strong><span>${esc(b)}</span></div>`).join("");
-  const proof = t.proof.map(([a, b, c], i) => `<div class="proof-row"><div><strong>${esc(a)}</strong><span>${esc(b)}</span></div><b class="${i === 0 || i === 3 ? "risk" : ""}">${esc(c)}</b></div>`).join("");
   const steps = t.steps.map(([a, b, c]) => `<article class="step-card"><small>${esc(a)}</small><strong>${esc(b)}</strong><p>${esc(c)}</p></article>`).join("");
   const leaks = t.leaks.map(([a, b, c]) => `<article class="leak-row"><div><strong>${esc(a)}</strong><p>${esc(b)}</p></div><span>${esc(c)}</span></article>`).join("");
   const tiers = t.tiers.map(([a, b, c, d, e, f]) => `<article class="tier-card${f ? " featured" : ""}">${f ? `<span class="featured-label">${esc(f)}</span>` : ""}<h3>${esc(a)}</h3><div class="price">${esc(b)}</div><p>${esc(c)}</p><ul>${list(d)}</ul><a href="#request">${esc(e)}</a></article>`).join("");
@@ -104,12 +184,171 @@ function render(locale) {
     ["02", "Platform demo", "/platform/", "Кликабельная продуктовая платформа: Owner, ROP и Manager views."],
     ["03", "Client workspace", "/client.html", "MVP-кабинет клиента: транскрипты, анализ, отчеты и лимиты."],
     ["04", "Operator admin", "/admin.html", "Твой операторский контур: заявки, импорт звонков, отчеты и экспорт."]
-  ].map(([n, a, href, b]) => `<a class="demo-route" href="${href}"><small>${n}</small><strong>${esc(a)}</strong><span>${esc(b)}</span></a>`).join("");
-  return `<!doctype html><html lang="${t.lang}"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${esc(t.title)}</title><meta name="description" content="${esc(t.desc)}"/><style>${css()}</style></head><body><header class="topbar"><div class="wrap nav"><a class="brand" href="${url(locale)}"><strong>CallControl AI</strong><span>${esc(t.badge)}</span></a><nav class="nav-links"><a href="#process">${esc(t.nav[0])}</a><a href="#sample">${esc(t.nav[1])}</a><a href="#pricing">${esc(t.nav[2])}</a><a href="/platform/">Platform</a><a href="/client.html">Client</a><a class="nav-cta" href="#request">${esc(t.nav[4])}</a></nav><div class="lang-switch">${langs}</div></div></header><main><section class="hero"><div class="wrap hero-grid"><div><span class="badge">${esc(t.badge)}</span><h1>${esc(t.h1)}</h1><p class="hero-lead">${esc(t.lead)}</p><div class="actions"><a class="button primary" href="#request">${esc(t.cta)}</a><a class="button secondary" href="/platform/">Platform demo</a><a class="button secondary" href="/client.html">Client workspace</a><a class="button secondary" href="/admin.html">Operator admin</a></div><div class="trust-grid">${trust}</div></div><aside class="proof-card"><h2>${esc(t.proofTitle)}</h2>${proof}</aside></div></section><section class="demo-hub-section" id="demo-hub"><div class="wrap"><div class="section-head"><h2>Demo system map</h2><p>Все слои связаны между собой: публичная витрина, кликабельная платформа, клиентский MVP и операторская админка.</p></div><div class="demo-route-grid">${demoHub}</div></div></section><section id="sample"><div class="wrap sample-layout"><article class="sample-preview"><small>Sample Report · CallControl AI</small><h3>${esc(t.sampleTitle)}</h3><p>${esc(t.sampleLead)}</p><div class="sample-list">${sampleMetrics}</div><a class="button primary" href="${t.sampleFile}">${esc(t.sample)}</a></article><div class="sample-side"><div class="section-head"><h2>${esc(t.sampleTitle)}</h2><p>${esc(t.sampleLead)}</p><div class="sample-note">${esc(t.sampleNote)}</div></div><div class="grid-4">${mini(t.cards)}</div></div></div></section><section id="process"><div class="wrap"><div class="section-head"><h2>${esc(t.processTitle)}</h2><p>${esc(t.processLead)}</p></div><div class="grid-4">${steps}</div></div></section><section><div class="wrap two-col"><div class="section-head"><h2>${esc(t.leakTitle)}</h2><p>${esc(t.leakLead)}</p></div><div class="leak-stack">${leaks}</div></div></section><section id="pricing"><div class="wrap"><div class="section-head"><h2>${esc(t.pricingTitle)}</h2><p>${esc(t.pricingLead)}</p></div><div class="pricing-grid">${tiers}</div></div></section><section><div class="wrap"><div class="section-head"><h2>${esc(t.futureTitle)}</h2><p>${esc(t.futureLead)}</p></div><div class="future-grid">${mini(t.future)}</div><p class="future-note">${esc(t.futureNote)}</p></div></section><section id="faq"><div class="wrap"><div class="section-head"><h2>${esc(t.faqTitle)}</h2></div><div class="faq-grid">${faq}</div></div></section><section id="request"><div class="wrap"><div class="form-card"><div class="section-head"><h2>${esc(t.formTitle)}</h2><p>${esc(t.formLead)}</p></div><form id="leadForm"><div class="form-grid">${fields(t)}</div><div class="actions"><button class="button primary" type="submit">${esc(t.send)}</button></div><div class="form-status" id="formStatus"></div><p class="privacy">${esc(t.privacy)}</p></form></div></div></section></main><footer class="footer"><div class="wrap footer-inner"><span>${esc(t.footer)}</span><span>Telegram: @manukianartur1997 · <a href="/platform/">Platform</a> · <a href="/client.html">Client</a> · <a href="/admin.html">Admin</a></span></div></footer><script>const ok=${JSON.stringify(t.ok)},fail=${JSON.stringify(t.fail)},sending=${JSON.stringify(t.sending)},send=${JSON.stringify(t.send)};const f=document.querySelector("#leadForm"),s=document.querySelector("#formStatus");f.addEventListener("submit",async(e)=>{e.preventDefault();const b=f.querySelector("button");b.disabled=true;b.textContent=sending;s.innerHTML="";const p=Object.fromEntries(new FormData(f).entries());p.source="callcontrol-public-landing";p.locale=${JSON.stringify(locale)};try{const r=await fetch("/api/leads",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});if(!r.ok)throw new Error("request_failed");s.innerHTML="<strong>"+ok[0]+"</strong><br>"+ok[1];f.reset()}catch(_){s.innerHTML="<strong>"+fail[0]+"</strong><br>"+fail[1]}finally{b.disabled=false;b.textContent=send}})</script></body></html>`;
+  ].map(([n, a, href, b]) => `<a class="demo-route reveal" href="${href}"><small>${n}</small><strong>${esc(a)}</strong><span>${esc(b)}</span></a>`).join("");
+
+  const miniStats = (t.miniStats || []).map(([a, b]) => `<div class="hero-stat-mini"><b>${esc(a)}</b><span>${esc(b)}</span></div>`).join("");
+
+  // Real-looking sample report "screenshot" rendered as styled HTML (prints crisp, no image asset needed).
+  const mgrBars = (t.reportManagers || []).map(([id, note, score]) => {
+    const tone = score >= 80 ? "good" : score >= 60 ? "mid" : "bad";
+    return `<div class="rep-mgr"><div class="rep-mgr-head"><b>${esc(id)}</b><span>${esc(note)}</span></div><div class="rep-bar"><i class="${tone}" style="width:${score}%"></i></div><em>${score}</em></div>`;
+  }).join("");
+  const repTags = (t.reportTagLabels || []).map((label, i) => `<span class="rep-tag${i === 0 ? " danger" : ""}">${esc(label)}</span>`).join("");
+  const reportShot = `<div class="report-shot"><div class="rep-chrome"><span></span><span></span><span></span><em>callcontrol-ai-audit.pdf</em></div><div class="rep-body"><div class="rep-top"><div><div class="rep-kicker">${esc(t.reportTitle)}</div><div class="rep-sub">${esc(t.reportSub)}</div></div><div class="rep-badge">${esc(t.badgeVerified)}</div></div><div class="rep-var"><span>${esc(t.reportVarLabel)}</span><b>${esc(t.heroStatValue)}</b><small>${esc(t.reportVarNote)}</small></div><div class="rep-block"><div class="rep-label">${esc(t.reportSummaryLabel)}</div><p>${esc(t.reportSummary)}</p></div><div class="rep-block"><div class="rep-label">${esc(t.reportMgrLabel)}</div>${mgrBars}</div><div class="rep-block rep-quote"><div class="rep-label">${esc(t.reportQuoteLabel)}</div><blockquote>${esc(t.reportQuote)}</blockquote></div><div class="rep-tags">${repTags}</div></div></div>`;
+
+  return `<!doctype html><html lang="${t.lang}"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${esc(t.title)}</title><meta name="description" content="${esc(t.desc)}"/><meta property="og:title" content="${esc(t.title)}"/><meta property="og:description" content="${esc(t.desc)}"/><meta property="og:type" content="website"/><style>${css()}</style></head><body><header class="topbar"><div class="wrap nav"><a class="brand" href="${url(locale)}"><strong>CallControl AI</strong><span>${esc(t.badge)}</span></a><nav class="nav-links"><a href="#process">${esc(t.nav[0])}</a><a href="#sample">${esc(t.nav[1])}</a><a href="#pricing">${esc(t.nav[2])}</a><a href="#faq">${esc(t.nav[3])}</a><a class="nav-cta" href="${esc(t.bookUrl)}" target="_blank" rel="noopener">${esc(t.bookCta)}</a></nav><div class="lang-switch">${langs}</div></div></header><main><section class="hero"><div class="hero-glow" aria-hidden="true"></div><div class="wrap hero-grid"><div class="hero-copy"><span class="badge reveal">${esc(t.badge)}</span><h1 class="reveal">${esc(t.h1)}</h1><p class="hero-lead reveal">${esc(t.lead)}</p><div class="hero-stat reveal"><div class="hero-stat-main"><span>${esc(t.heroStatLabel)}</span><b>${esc(t.heroStatValue)}</b><small>${esc(t.heroStatSub)}</small></div><div class="hero-stat-grid">${miniStats}</div></div><div class="actions reveal"><a class="button primary" href="${esc(t.bookUrl)}" target="_blank" rel="noopener">${esc(t.bookCta)}</a><a class="button secondary" href="#request">${esc(t.cta)}</a><a class="button ghost" href="#sample">${esc(t.sample)}</a></div><div class="author reveal"><span class="author-avatar" aria-hidden="true">${esc(t.authorInitials)}</span><div class="author-meta"><strong>${esc(t.authorName)}</strong><span>${esc(t.authorRole)}</span></div></div></div><aside class="hero-aside reveal">${reportShot}</aside></div><div class="wrap social-proof reveal"><span>${esc(t.socialProof)}</span></div></section><section id="sample"><div class="wrap sample-layout"><div class="sample-side"><div class="section-head reveal"><h2>${esc(t.sampleTitle)}</h2><p>${esc(t.sampleLead)}</p><div class="sample-note">${esc(t.sampleNote)}</div></div><div class="sample-list reveal">${sampleMetrics}</div><div class="actions reveal"><a class="button primary" href="${t.sampleFile}" target="_blank" rel="noopener">${esc(t.sample)}</a><a class="button secondary" href="${esc(t.bookUrl)}" target="_blank" rel="noopener">${esc(t.bookCta)}</a></div></div><div class="sample-shot reveal">${reportShot}</div></div><div class="wrap"><div class="grid-4 sample-cards">${mini(t.cards)}</div></div></section><section id="process"><div class="wrap"><div class="section-head reveal"><h2>${esc(t.processTitle)}</h2><p>${esc(t.processLead)}</p></div><div class="grid-4">${steps}</div></div></section><section><div class="wrap"><div class="section-head reveal"><h2>${esc(t.leakTitle)}</h2><p>${esc(t.leakLead)}</p></div><div class="leak-stack">${leaks}</div></div></section><section id="pricing"><div class="wrap"><div class="section-head reveal"><h2>${esc(t.pricingTitle)}</h2><p>${esc(t.pricingLead)}</p></div><div class="pricing-grid">${tiers}</div></div></section><section><div class="wrap"><div class="section-head reveal"><h2>${esc(t.futureTitle)}</h2><p>${esc(t.futureLead)}</p></div><div class="future-grid">${mini(t.future)}</div><p class="future-note">${esc(t.futureNote)}</p></div></section><section id="faq"><div class="wrap"><div class="section-head reveal"><h2>${esc(t.faqTitle)}</h2></div><div class="faq-grid">${faq}</div></div></section><section id="request"><div class="wrap"><div class="form-card reveal"><div class="section-head"><h2>${esc(t.formTitle)}</h2><p>${esc(t.formLead)}</p></div><form id="leadForm"><div class="form-grid">${fields(t)}</div><div class="actions"><button class="button primary" type="submit">${esc(t.send)}</button><a class="button secondary" href="${esc(t.bookUrl)}" target="_blank" rel="noopener">${esc(t.bookCta)}</a></div><div class="form-status" id="formStatus"></div><p class="privacy">${esc(t.privacy)}</p></form></div></div></section></main><footer class="footer"><div class="wrap footer-inner"><span>${esc(t.footer)}</span><span>Telegram: @manukianartur1997</span></div></footer><script>(function(){const ok=${JSON.stringify(t.ok)},fail=${JSON.stringify(t.fail)},sending=${JSON.stringify(t.sending)},send=${JSON.stringify(t.send)};const started=Date.now();const f=document.querySelector("#leadForm"),s=document.querySelector("#formStatus");f.addEventListener("submit",async(e)=>{e.preventDefault();const b=f.querySelector('button[type=submit]');b.disabled=true;b.textContent=sending;s.innerHTML="";const p=Object.fromEntries(new FormData(f).entries());p.source="callcontrol-public-landing";p.locale=${JSON.stringify(locale)};p.formElapsedMs=Date.now()-started;try{const r=await fetch("/api/leads",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});if(!r.ok)throw new Error("request_failed");s.innerHTML="<strong>"+ok[0]+"</strong><br>"+ok[1];f.reset()}catch(_){s.innerHTML="<strong>"+fail[0]+"</strong><br>"+fail[1]}finally{b.disabled=false;b.textContent=send}});const io=new IntersectionObserver((es)=>{es.forEach((en)=>{if(en.isIntersecting){en.target.classList.add("in");io.unobserve(en.target)}})},{threshold:.12,rootMargin:"0px 0px -40px 0px"});document.querySelectorAll(".reveal").forEach((el,i)=>{el.style.transitionDelay=(Math.min(i,6)*40)+"ms";io.observe(el)});const tb=document.querySelector(".topbar");addEventListener("scroll",()=>{tb.classList.toggle("scrolled",scrollY>8)},{passive:true})})();</script></body></html>`;
 }
 
 function css() {
-  return `@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap");*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:#f8fafc;background:linear-gradient(135deg,rgba(56,189,248,.16),transparent 34%),linear-gradient(215deg,rgba(99,102,241,.2),transparent 38%),linear-gradient(180deg,#020617 0%,#07111f 42%,#0f172a 100%);font-family:Geist,Inter,system-ui,sans-serif;letter-spacing:0}a{color:inherit}.wrap{width:min(1180px,calc(100% - 32px));margin:0 auto}.topbar{position:sticky;top:0;z-index:20;border-bottom:1px solid rgba(226,232,240,.16);background:rgba(2,6,23,.72);backdrop-filter:blur(18px)}.nav{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:72px}.brand{display:flex;flex-direction:column;text-decoration:none}.brand strong{font-size:17px;letter-spacing:-.02em}.brand span,.nav-links{color:#b9c6d8;font-size:14px}.brand span{font-size:12px}.nav-links{display:flex;align-items:center;gap:16px}.nav-links a{text-decoration:none}.nav-cta{padding:10px 14px;border:1px solid rgba(125,211,252,.4);border-radius:10px;background:rgba(56,189,248,.12);color:#e0f2fe;font-weight:600}.lang-switch{display:flex;gap:6px}.lang-pill{min-width:34px;padding:7px 9px;border:1px solid rgba(226,232,240,.16);border-radius:9px;text-align:center;text-decoration:none;color:#b9c6d8;font:600 12px "JetBrains Mono",monospace}.lang-pill.active{color:#f8fafc;border-color:rgba(125,211,252,.42);background:rgba(125,211,252,.11)}section{padding:clamp(58px,8vw,96px) 0}.hero{padding-top:clamp(54px,8vw,104px)}.hero-grid,.sample-layout,.two-col{display:grid;grid-template-columns:minmax(0,1.04fr) minmax(330px,.96fr);gap:clamp(24px,5vw,58px);align-items:center}.badge{display:inline-flex;padding:8px 11px;border:1px solid rgba(125,211,252,.28);border-radius:999px;background:rgba(125,211,252,.09);color:#bae6fd;font:600 11px "JetBrains Mono",monospace;text-transform:uppercase}h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.028em}h1{max-width:790px;margin-top:20px;font-size:clamp(44px,7vw,86px);line-height:.98}.hero-lead{max-width:720px;margin:20px 0 0;color:#b9c6d8;font-size:clamp(17px,2vw,21px);line-height:1.55}.actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}.button{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:12px 16px;border-radius:11px;border:1px solid rgba(226,232,240,.26);text-decoration:none;font-weight:600}.button.primary{border-color:rgba(125,211,252,.42);background:linear-gradient(135deg,#38bdf8,#4f46e5);color:#fff;box-shadow:0 14px 38px rgba(56,189,248,.18)}.button.secondary{background:rgba(255,255,255,.07)}.demo-hub-section{padding-top:0}.demo-route-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.demo-route{display:grid;gap:10px;min-height:170px;padding:20px;border:1px solid rgba(125,211,252,.28);border-radius:16px;background:rgba(255,255,255,.075);text-decoration:none;transition:transform .18s ease,border-color .18s ease,background .18s ease}.demo-route:hover{transform:translateY(-2px);border-color:rgba(125,211,252,.55);background:rgba(125,211,252,.11)}.demo-route small{color:#7dd3fc;font:600 12px "JetBrains Mono",monospace}.demo-route strong{font-size:20px}.demo-route span{color:#b9c6d8;line-height:1.45}.trust-grid,.grid-4,.future-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.trust-grid{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:30px}.trust-item,.proof-card,.mini-card,.step-card,.leak-row,.tier-card,.faq-item,.form-card{border:1px solid rgba(226,232,240,.16);background:rgba(255,255,255,.075);border-radius:14px;backdrop-filter:blur(16px)}.trust-item,.mini-card,.step-card{padding:18px}.trust-item strong,.price,.proof-row b{display:block;font-family:"JetBrains Mono",monospace}.trust-item strong{color:#e0f2fe;font-size:20px}.trust-item span,.mini-card p,.step-card p{display:block;margin-top:5px;color:#b9c6d8;font-size:13px;line-height:1.45}.proof-card{padding:18px;box-shadow:0 22px 90px rgba(0,0,0,.28)}.proof-card h2{margin-bottom:10px;font-size:22px}.proof-row{display:grid;grid-template-columns:1fr auto;gap:14px;padding:15px 0;border-bottom:1px solid rgba(226,232,240,.16)}.proof-row:last-child{border-bottom:0}.proof-row strong{display:block;margin-bottom:5px}.proof-row span{color:#b9c6d8;font-size:13px;line-height:1.4}.proof-row b{color:#86efac;white-space:nowrap}.proof-row b.risk{color:#fda4af}.section-head{max-width:780px;margin-bottom:24px}.section-head h2{font-size:clamp(30px,4.6vw,56px);line-height:1.05}.section-head p{color:#b9c6d8;font-size:17px;line-height:1.55}.sample-preview{min-height:430px;padding:24px;border-radius:16px;border:1px solid rgba(226,232,240,.26);background:linear-gradient(180deg,rgba(248,250,252,.96),rgba(226,232,240,.92));color:#0f172a}.sample-preview small{color:#475569;font:600 12px "JetBrains Mono",monospace;text-transform:uppercase}.sample-preview h3{margin-top:16px;font-size:30px;color:#0f172a}.sample-preview p{color:#475569;line-height:1.55}.sample-list{display:grid;gap:10px;margin:22px 0}.sample-list div{display:flex;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid rgba(15,23,42,.12);font-size:14px}.sample-list b{font-family:"JetBrains Mono",monospace;color:#00684a}.sample-side{display:grid;gap:12px}.sample-note{margin-top:14px;padding:13px 14px;border-radius:12px;background:rgba(245,158,11,.13);color:#fde68a;font-size:13px;line-height:1.45}.step-card small{display:block;margin-bottom:14px;color:#7dd3fc;font:600 12px "JetBrains Mono",monospace}.leak-stack{display:grid;gap:10px}.leak-row{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;padding:16px 18px}.leak-row p{margin:5px 0 0;color:#b9c6d8;line-height:1.5}.leak-row span{padding:7px 9px;border-radius:999px;background:rgba(251,113,133,.13);color:#fecdd3;font:600 11px "JetBrains Mono",monospace;white-space:nowrap}.pricing-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}.tier-card{position:relative;padding:22px}.tier-card.featured{border-color:rgba(34,197,94,.38);background:rgba(34,197,94,.08)}.featured-label{position:absolute;right:16px;top:16px;padding:6px 8px;border-radius:999px;background:rgba(34,197,94,.16);color:#bbf7d0;font:600 11px "JetBrains Mono",monospace}.tier-card h3{font-size:23px}.price{margin-top:13px;color:#e0f2fe;font-size:28px}.tier-card p,.future-note{color:#b9c6d8}.tier-card ul{margin:18px 0;padding-left:19px;color:#b9c6d8;line-height:1.65}.tier-card a{display:inline-flex;width:100%;justify-content:center;padding:12px 14px;border-radius:11px;background:rgba(255,255,255,.08);border:1px solid rgba(226,232,240,.26);text-decoration:none;font-weight:600}.future-note{margin-top:14px;font-size:14px}.faq-grid{display:grid;gap:10px}.faq-item summary{cursor:pointer;padding:17px 18px;font-weight:600}.faq-item p{margin:0;padding:0 18px 18px;color:#b9c6d8;line-height:1.55}.form-card{padding:clamp(20px,4vw,34px)}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}label{display:grid;gap:7px;color:#b9c6d8;font-size:13px}input,textarea{width:100%;border:1px solid rgba(226,232,240,.16);border-radius:11px;background:rgba(2,6,23,.46);color:#f8fafc;font:inherit;padding:12px 13px;outline:none}textarea{min-height:106px;resize:vertical}.full{grid-column:1/-1}.form-status{margin-top:14px;min-height:42px;color:#b9c6d8;line-height:1.5}.form-status strong{color:#f8fafc}.privacy{margin-top:10px;color:#7d8fa6;font-size:13px}.footer{padding:28px 0 42px;color:#b9c6d8;border-top:1px solid rgba(226,232,240,.16)}.footer-inner{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap}@media(max-width:980px){.hero-grid,.sample-layout,.two-col,.pricing-grid{grid-template-columns:1fr}.grid-4,.future-grid,.demo-route-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.nav-links{display:none}}@media(max-width:640px){.wrap{width:min(100% - 24px,1180px)}h1{font-size:42px}.trust-grid,.grid-4,.future-grid,.form-grid,.demo-route-grid{grid-template-columns:1fr}.leak-row{grid-template-columns:1fr}.sample-preview{min-height:auto}}`;
+  return `@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap");
+*{box-sizing:border-box}
+:root{--accent:#38bdf8;--accent2:#6366f1;--ink:#f8fafc;--muted:#9fb1c7;--line:rgba(226,232,240,.12);--card:rgba(255,255,255,.045);--radius:16px}
+html{scroll-behavior:smooth}
+body{margin:0;color:var(--ink);background:radial-gradient(1100px 540px at 78% -8%,rgba(56,189,248,.16),transparent 60%),radial-gradient(900px 520px at 8% 8%,rgba(99,102,241,.16),transparent 55%),linear-gradient(180deg,#040813 0%,#060c18 44%,#0a1120 100%);background-attachment:fixed;font-family:Geist,Inter,system-ui,sans-serif;line-height:1.5;-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{width:min(1180px,calc(100% - 40px));margin:0 auto}
+.topbar{position:sticky;top:0;z-index:30;border-bottom:1px solid transparent;background:transparent;transition:background .25s ease,border-color .25s ease,backdrop-filter .25s ease}
+.topbar.scrolled{border-bottom:1px solid var(--line);background:rgba(4,8,19,.72);backdrop-filter:blur(18px)}
+.nav{display:flex;align-items:center;justify-content:space-between;gap:18px;min-height:72px}
+.brand{display:flex;flex-direction:column;text-decoration:none}
+.brand strong{font-size:17px;letter-spacing:-.02em}
+.brand span{color:var(--muted);font-size:12px}
+.nav-links{display:flex;align-items:center;gap:22px;color:var(--muted);font-size:14px}
+.nav-links a{text-decoration:none;transition:color .18s ease}.nav-links a:hover{color:var(--ink)}
+.nav-cta{padding:9px 15px;border:1px solid rgba(125,211,252,.4);border-radius:999px;background:rgba(56,189,248,.12);color:#e0f2fe;font-weight:600}.nav-cta:hover{background:rgba(56,189,248,.2)}
+.lang-switch{display:flex;gap:6px}
+.lang-pill{min-width:34px;padding:7px 9px;border:1px solid var(--line);border-radius:9px;text-align:center;text-decoration:none;color:var(--muted);font:600 12px "JetBrains Mono",monospace;transition:all .18s ease}
+.lang-pill.active{color:#f8fafc;border-color:rgba(125,211,252,.42);background:rgba(125,211,252,.11)}
+section{padding:clamp(56px,8vw,108px) 0}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.03em}
+h1{font-size:clamp(40px,6.4vw,78px);line-height:1.02;font-weight:700}
+.badge{display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border:1px solid rgba(125,211,252,.25);border-radius:999px;background:rgba(125,211,252,.08);color:#bae6fd;font:600 11px "JetBrains Mono",monospace;text-transform:uppercase;letter-spacing:.04em}
+.button{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:13px 20px;border-radius:12px;border:1px solid var(--line);text-decoration:none;font-weight:600;transition:transform .16s ease,box-shadow .16s ease,background .16s ease,border-color .16s ease}
+.button:hover{transform:translateY(-1px)}
+.button.primary{border-color:transparent;background:linear-gradient(135deg,#38bdf8,#6366f1);color:#fff;box-shadow:0 16px 40px rgba(56,189,248,.22)}.button.primary:hover{box-shadow:0 20px 52px rgba(56,189,248,.32)}
+.button.secondary{background:rgba(255,255,255,.06)}.button.secondary:hover{background:rgba(255,255,255,.11)}
+.button.ghost{border-color:transparent;background:transparent;color:var(--muted)}.button.ghost:hover{color:var(--ink)}
+.actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
+/* hero */
+.hero{position:relative;padding-top:clamp(48px,8vw,96px);overflow:hidden}
+.hero-glow{position:absolute;inset:-20% -10% auto;height:560px;background:radial-gradient(620px 360px at 75% 12%,rgba(99,102,241,.22),transparent 70%);filter:blur(8px);pointer-events:none}
+.hero-grid{position:relative;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(360px,.95fr);gap:clamp(28px,5vw,64px);align-items:center}
+.hero-copy h1{margin-top:18px;max-width:14ch}
+.hero-lead{max-width:54ch;margin:20px 0 0;color:var(--muted);font-size:clamp(17px,1.6vw,20px)}
+.hero-stat{margin-top:30px;display:grid;gap:14px;padding:20px;border:1px solid var(--line);border-radius:var(--radius);background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02))}
+.hero-stat-main span{display:block;color:var(--muted);font:600 12px "JetBrains Mono",monospace;text-transform:uppercase;letter-spacing:.05em}
+.hero-stat-main b{display:block;margin:6px 0 4px;font-size:clamp(44px,6vw,68px);line-height:1;font-weight:700;background:linear-gradient(120deg,#fff,#7dd3fc 55%,#a5b4fc);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;font-family:Geist,sans-serif;letter-spacing:-.04em}
+.hero-stat-main small{display:block;color:var(--muted);font-size:13px;max-width:46ch}
+.hero-stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding-top:14px;border-top:1px solid var(--line)}
+.hero-stat-mini b{display:block;font:600 18px "JetBrains Mono",monospace;color:#e0f2fe}
+.hero-stat-mini span{display:block;margin-top:3px;color:var(--muted);font-size:11.5px;line-height:1.4}
+.author{display:flex;align-items:center;gap:13px;margin-top:26px}
+.author-avatar{display:grid;place-items:center;width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#38bdf8,#6366f1);color:#fff;font-weight:700;font-size:16px;letter-spacing:.02em;box-shadow:0 8px 22px rgba(56,189,248,.3)}
+.author-meta strong{display:block;font-size:15px}
+.author-meta span{color:var(--muted);font-size:13px}
+.social-proof{margin-top:46px;padding-top:24px;border-top:1px solid var(--line)}
+.social-proof span{color:var(--muted);font:600 13px "JetBrains Mono",monospace;letter-spacing:.02em}
+/* report screenshot */
+.hero-aside{position:relative}
+.report-shot{border-radius:18px;border:1px solid rgba(148,163,184,.18);background:linear-gradient(180deg,#0c1424,#0a101d);box-shadow:0 40px 90px rgba(2,6,23,.6),0 0 0 1px rgba(125,211,252,.04);overflow:hidden}
+.hero-aside .report-shot{transform:perspective(1600px) rotateY(-7deg) rotateX(2deg)}
+.rep-chrome{display:flex;align-items:center;gap:7px;padding:12px 15px;border-bottom:1px solid rgba(148,163,184,.14);background:rgba(255,255,255,.02)}
+.rep-chrome span{width:11px;height:11px;border-radius:50%;background:rgba(148,163,184,.3)}.rep-chrome span:first-child{background:#fb7185}.rep-chrome span:nth-child(2){background:#fbbf24}.rep-chrome span:nth-child(3){background:#34d399}
+.rep-chrome em{margin-left:8px;color:#7d8fa6;font:600 11px "JetBrains Mono",monospace;font-style:normal}
+.rep-body{padding:20px}
+.rep-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
+.rep-kicker{font-size:18px;font-weight:700;letter-spacing:-.02em}
+.rep-sub{margin-top:3px;color:var(--muted);font:600 11px "JetBrains Mono",monospace}
+.rep-badge{flex:none;padding:6px 9px;border-radius:999px;background:rgba(245,158,11,.13);color:#fcd34d;font:600 10px "JetBrains Mono",monospace}
+.rep-var{padding:16px;border-radius:14px;border:1px solid rgba(251,113,133,.22);background:linear-gradient(135deg,rgba(251,113,133,.1),rgba(99,102,241,.06));margin-bottom:16px}
+.rep-var span{color:var(--muted);font:600 11px "JetBrains Mono",monospace;text-transform:uppercase;letter-spacing:.05em}
+.rep-var b{display:block;margin:5px 0 2px;font-size:34px;font-weight:700;color:#fecdd3;letter-spacing:-.03em}
+.rep-var small{color:var(--muted);font-size:12px}
+.rep-block{margin-bottom:16px}
+.rep-label{margin-bottom:9px;color:#7dd3fc;font:600 11px "JetBrains Mono",monospace;text-transform:uppercase;letter-spacing:.05em}
+.rep-block p{margin:0;color:#cbd5e1;font-size:13.5px;line-height:1.55}
+.rep-mgr{display:grid;grid-template-columns:1fr 84px 26px;align-items:center;gap:10px;margin-bottom:9px}
+.rep-mgr-head b{font:600 13px "JetBrains Mono",monospace;color:#e0f2fe}
+.rep-mgr-head span{display:block;margin-top:1px;color:var(--muted);font-size:11px}
+.rep-bar{height:7px;border-radius:999px;background:rgba(148,163,184,.16);overflow:hidden}
+.rep-bar i{display:block;height:100%;border-radius:999px}
+.rep-bar i.good{background:linear-gradient(90deg,#34d399,#10b981)}.rep-bar i.mid{background:linear-gradient(90deg,#fbbf24,#f59e0b)}.rep-bar i.bad{background:linear-gradient(90deg,#fb7185,#f43f5e)}
+.rep-mgr em{font:600 12px "JetBrains Mono",monospace;color:var(--muted);font-style:normal;text-align:right}
+.rep-quote blockquote{margin:0;padding:12px 14px;border-left:3px solid rgba(125,211,252,.5);border-radius:0 10px 10px 0;background:rgba(125,211,252,.06);color:#cbd5e1;font-size:13px;line-height:1.55}
+.rep-tags{display:flex;flex-wrap:wrap;gap:7px;margin-top:2px}
+.rep-tag{padding:5px 10px;border-radius:999px;background:rgba(148,163,184,.12);color:#cbd5e1;font:600 11px "JetBrains Mono",monospace}
+.rep-tag.danger{background:rgba(251,113,133,.14);color:#fecdd3}
+/* generic layout */
+.section-head{max-width:760px;margin-bottom:36px}
+.section-head h2{font-size:clamp(28px,4.2vw,50px);line-height:1.06}
+.section-head p{margin-top:14px;color:var(--muted);font-size:clamp(16px,1.5vw,18px)}
+.grid-4,.future-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.mini-card,.step-card,.leak-row,.tier-card,.faq-item,.form-card{border:1px solid var(--line);background:var(--card);border-radius:var(--radius)}
+.mini-card,.step-card{padding:20px;transition:border-color .2s ease,transform .2s ease,background .2s ease}
+.mini-card:hover,.step-card:hover{border-color:rgba(125,211,252,.3);transform:translateY(-2px);background:rgba(255,255,255,.06)}
+.mini-card strong,.step-card strong{font-size:16px}
+.mini-card p,.step-card p{display:block;margin-top:8px;color:var(--muted);font-size:13.5px;line-height:1.55}
+.step-card small{display:block;margin-bottom:14px;color:#7dd3fc;font:600 13px "JetBrains Mono",monospace}
+/* sample section */
+.sample-layout{display:grid;grid-template-columns:minmax(0,.92fr) minmax(360px,1.08fr);gap:clamp(28px,5vw,58px);align-items:center;margin-bottom:34px}
+.sample-side{display:grid;gap:18px;align-content:start}
+.sample-side .section-head{margin-bottom:0}
+.sample-list{display:grid;gap:2px}
+.sample-list div{display:flex;justify-content:space-between;gap:14px;padding:12px 0;border-bottom:1px solid var(--line);font-size:14px;color:var(--muted)}
+.sample-list b{font-family:"JetBrains Mono",monospace;color:#7dd3fc}
+.sample-note{padding:13px 14px;border-radius:12px;background:rgba(245,158,11,.1);color:#fcd34d;font-size:13px;line-height:1.45}
+.sample-shot .report-shot{transform:perspective(1700px) rotateY(5deg) rotateX(2deg)}
+.sample-cards{margin-top:8px}
+/* leaks */
+.leak-stack{display:grid;gap:12px}
+.leak-row{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;padding:18px 20px;transition:border-color .2s ease,background .2s ease}
+.leak-row:hover{border-color:rgba(251,113,133,.28);background:rgba(255,255,255,.05)}
+.leak-row strong{font-size:16px}
+.leak-row p{margin:6px 0 0;color:var(--muted);line-height:1.5;font-size:14px}
+.leak-row span{padding:7px 11px;border-radius:999px;background:rgba(251,113,133,.12);color:#fecdd3;font:600 11px "JetBrains Mono",monospace;white-space:nowrap}
+/* pricing */
+.pricing-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.tier-card{position:relative;padding:26px;transition:border-color .2s ease,transform .2s ease}
+.tier-card:hover{transform:translateY(-3px)}
+.tier-card.featured{border-color:rgba(125,211,252,.42);background:linear-gradient(180deg,rgba(56,189,248,.1),rgba(99,102,241,.05));box-shadow:0 28px 70px rgba(56,189,248,.14)}
+.featured-label{position:absolute;right:18px;top:18px;padding:6px 10px;border-radius:999px;background:rgba(56,189,248,.18);color:#bae6fd;font:600 11px "JetBrains Mono",monospace}
+.tier-card h3{font-size:22px}
+.price{margin-top:14px;color:#fff;font-size:30px;font-weight:700;letter-spacing:-.02em}
+.tier-card>p{margin-top:8px;color:var(--muted);font-size:14px}
+.tier-card ul{margin:20px 0;padding-left:20px;color:var(--muted);line-height:1.7;font-size:14px}
+.tier-card a{display:inline-flex;width:100%;justify-content:center;min-height:46px;align-items:center;padding:12px 14px;border-radius:11px;background:rgba(255,255,255,.06);border:1px solid var(--line);text-decoration:none;font-weight:600;transition:background .18s ease}
+.tier-card.featured a{background:linear-gradient(135deg,#38bdf8,#6366f1);border-color:transparent;color:#fff}
+.tier-card a:hover{background:rgba(255,255,255,.12)}.tier-card.featured a:hover{filter:brightness(1.05)}
+.future-grid .mini-card{padding:18px}
+.future-note{margin-top:16px;color:var(--muted);font-size:14px}
+/* faq */
+.faq-grid{display:grid;gap:10px}
+.faq-item summary{cursor:pointer;padding:18px 20px;font-weight:600;list-style:none}
+.faq-item summary::-webkit-details-marker{display:none}
+.faq-item summary::after{content:"+";float:right;color:var(--muted);font-weight:400}
+.faq-item[open] summary::after{content:"–"}
+.faq-item p{margin:0;padding:0 20px 20px;color:var(--muted);line-height:1.6}
+/* form */
+.form-card{padding:clamp(22px,4vw,40px)}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+label{display:grid;gap:7px;color:var(--muted);font-size:13px}
+input,textarea{width:100%;border:1px solid var(--line);border-radius:11px;background:rgba(2,6,23,.5);color:var(--ink);font:inherit;padding:13px 14px;outline:none;transition:border-color .18s ease,box-shadow .18s ease}
+input:focus,textarea:focus{border-color:rgba(125,211,252,.55);box-shadow:0 0 0 3px rgba(56,189,248,.14)}
+textarea{min-height:108px;resize:vertical}
+.full{grid-column:1/-1}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.form-status{margin-top:16px;min-height:42px;color:var(--muted);line-height:1.5}
+.form-status strong{color:var(--ink)}
+.privacy{margin-top:12px;color:#6b7c93;font-size:13px}
+/* footer */
+.footer{padding:30px 0 48px;color:var(--muted);border-top:1px solid var(--line)}
+.footer-inner{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;font-size:14px}
+/* reveal */
+.reveal{opacity:0;transform:translateY(16px);transition:opacity .6s cubic-bezier(.22,1,.36,1),transform .6s cubic-bezier(.22,1,.36,1)}
+.reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}.button:hover,.mini-card:hover,.step-card:hover,.tier-card:hover{transform:none}html{scroll-behavior:auto}}
+@media(max-width:980px){.hero-grid,.sample-layout,.pricing-grid{grid-template-columns:1fr}.hero-aside .report-shot,.sample-shot .report-shot{transform:none}.grid-4,.future-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.nav-links{display:none}.sample-shot{order:-1}}
+@media(max-width:640px){.wrap{width:min(100% - 28px,1180px)}.grid-4,.future-grid,.form-grid{grid-template-columns:1fr}.hero-stat-grid{grid-template-columns:1fr}.leak-row{grid-template-columns:1fr}.footer-inner{flex-direction:column}}`;
 }
 
 module.exports = function generatePublicLandingLive() {

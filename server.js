@@ -226,10 +226,49 @@ function writeLeads(leads) {
   fs.writeFileSync(leadsPath, leads.map((lead) => JSON.stringify(lead)).join("\n") + (leads.length ? "\n" : ""), "utf8");
 }
 
+// In-memory anti-spam state for the local dev server.
+const LEAD_RATE = { max: 5, windowMs: 10 * 60 * 1000, hits: new Map() };
+const MIN_FILL_MS = 2500;
+
+function leadSpamReason(input) {
+  if (String(input.company_website || input.fax || input._gotcha || "").trim()) return "honeypot";
+  const elapsed = Number(input.formElapsedMs);
+  if (Number.isFinite(elapsed) && elapsed >= 0 && elapsed < MIN_FILL_MS) return "too_fast";
+  const linkCount = (String(input.pain || "").match(/https?:\/\//gi) || []).length;
+  if (linkCount >= 3) return "link_spam";
+  return null;
+}
+
+function leadRateLimited(req) {
+  const ip =
+    (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+    req.socket?.remoteAddress ||
+    "unknown";
+  const now = Date.now();
+  const entry = LEAD_RATE.hits.get(ip);
+  if (!entry || now - entry.start > LEAD_RATE.windowMs) {
+    LEAD_RATE.hits.set(ip, { start: now, count: 1 });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > LEAD_RATE.max;
+}
+
 async function handleCreateLead(req, res) {
   try {
     const body = await readBody(req);
     const input = body ? JSON.parse(body) : {};
+
+    // Anti-spam: honeypot + minimum fill time. Return 200 so bots get no signal.
+    if (leadSpamReason(input)) {
+      sendJson(res, 200, { ok: true, status: "ignored", message: "Lead accepted" });
+      return;
+    }
+    if (leadRateLimited(req)) {
+      sendJson(res, 429, { ok: false, error: "rate_limited", message: "Too many requests. Try again later." });
+      return;
+    }
+
     const { lead, missing } = normalizeLead(input);
     if (missing.length) {
       sendJson(res, 400, { ok: false, error: "missing_required_fields", fields: missing });

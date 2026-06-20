@@ -3,7 +3,7 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
 
-/api/*
-  Access-Control-Allow-Origin: *
-  Access-Control-Allow-Methods: GET, POST, PATCH, PUT, OPTIONS
-  Access-Control-Allow-Headers: Content-Type, Authorization, X-App-Pin
+# CORS for /api/* is set per-request by the lead Worker/Function
+# (same-origin by default, widened via the ALLOWED_ORIGINS env var).
+# We intentionally do NOT set Access-Control-Allow-Origin: * here to avoid
+# letting arbitrary sites POST to the lead endpoint.
