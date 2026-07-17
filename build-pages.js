@@ -34,22 +34,31 @@ function copyDir(sourceDir, targetDir) {
   }
 }
 
-fs.rmSync(outDir, { recursive: true, force: true });
-fs.mkdirSync(outDir, { recursive: true });
+async function build() {
+  fs.rmSync(outDir, { recursive: true, force: true });
+  fs.mkdirSync(outDir, { recursive: true });
 
-for (const file of files) {
-  const source = path.join(root, file);
-  if (!fs.existsSync(source)) continue;
-  fs.copyFileSync(source, path.join(outDir, file));
+  for (const file of files) {
+    const source = path.join(root, file);
+    if (!fs.existsSync(source)) continue;
+    fs.copyFileSync(source, path.join(outDir, file));
+  }
+
+  const legacySource = path.join(root, "index.html");
+  if (fs.existsSync(legacySource)) {
+    fs.copyFileSync(legacySource, path.join(outDir, "legacy-demo.html"));
+  }
+
+  // Generates dist/index.html + locales + the sample report .html/.pdf
+  // pairs. Awaited because sample-report PDF rendering is async (pdfkit).
+  await require("./generate-public-landing-live")();
+
+  copyDir(path.join(root, "platform"), path.join(outDir, "platform"));
+
+  console.log(`Cloudflare Pages build ready: hybrid demo room -> dist/`);
 }
 
-const legacySource = path.join(root, "index.html");
-if (fs.existsSync(legacySource)) {
-  fs.copyFileSync(legacySource, path.join(outDir, "legacy-demo.html"));
-}
-
-require("./generate-public-landing-live")();
-
-copyDir(path.join(root, "platform"), path.join(outDir, "platform"));
-
-console.log(`Cloudflare Pages build ready: hybrid demo room -> dist/`);
+build().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

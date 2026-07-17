@@ -25,6 +25,16 @@ function assertMissing(file) {
   }
 }
 
+function assertRealPdf(file) {
+  const buffer = fs.readFileSync(file);
+  if (buffer.length < 1000) {
+    throw new Error(`${file} is too small to be a real rendered PDF (${buffer.length} bytes)`);
+  }
+  if (buffer.slice(0, 5).toString("latin1") !== "%PDF-") {
+    throw new Error(`${file} does not start with a %PDF- header`);
+  }
+}
+
 run("node", ["--check", "build-pages.js"]);
 run("node", ["--check", "cloudflare-worker.example.js"]);
 run("node", ["--check", "generate-public-landing-live.js"]);
@@ -56,5 +66,15 @@ for (const file of ["dist/index.html", "dist/ru/index.html", "dist/uk/index.html
   assertExcludes(file, "/client.html");
   assertExcludes(file, "/admin.html");
 }
+
+// The "Посмотреть пример"/"Download PDF" CTAs must point at a real rendered
+// report, not the raw .md source or a browser print instruction.
+assertIncludes("dist/index.html", "/samples/b2b-saas-ru-sample-report.html");
+assertIncludes("dist/index.html", "/samples/b2b-saas-ru-sample-report.pdf");
+assertIncludes("dist/samples/b2b-saas-ru-sample-report.html", "Короткий вывод");
+assertIncludes("dist/samples/b2b-saas-ru-sample-report.html", "Скачать PDF");
+assertIncludes("dist/samples/edtech-ua-sample-report.html", "Короткий висновок");
+assertRealPdf("dist/samples/b2b-saas-ru-sample-report.pdf");
+assertRealPdf("dist/samples/edtech-ua-sample-report.pdf");
 
 console.log("Smoke check passed");
