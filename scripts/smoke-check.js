@@ -77,4 +77,11 @@ assertIncludes("dist/samples/edtech-ua-sample-report.html", "Короткий в
 assertRealPdf("dist/samples/b2b-saas-ru-sample-report.pdf");
 assertRealPdf("dist/samples/edtech-ua-sample-report.pdf");
 
+// Self-serve pricing calculator: call-volume slider + add-ons + live total.
+for (const file of ["dist/index.html", "dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html"]) {
+  assertIncludes(file, 'id="calcCalls"');
+  assertIncludes(file, 'data-calc-addon');
+  assertIncludes(file, "calcTotal");
+}
+
 console.log("Smoke check passed");
