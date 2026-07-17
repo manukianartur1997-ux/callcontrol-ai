@@ -192,32 +192,28 @@ function readBody(req) {
   });
 }
 
-function normalizeLead(input) {
-  const now = new Date().toISOString();
-  const lead = {
-    id: crypto.randomUUID(),
-    createdAt: now,
-    status: "01_NEW",
-    source: String(input.source || "callcontrol-demo"),
-    name: String(input.name || "").trim(),
-    role: String(input.role || "").trim(),
-    niche: String(input.niche || "").trim(),
-    dataFormat: String(input.dataFormat || input.data_format || "").trim(),
-    callsPerMonth: String(input.callsPerMonth || input.calls_per_month || "").trim(),
-    contact: String(input.contact || "").trim(),
-    company: String(input.company || "").trim(),
-    site: String(input.site || "").trim(),
-    team: String(input.team || "").trim(),
-    pain: String(input.pain || "").trim(),
-    data: String(input.data || "").trim(),
-    auditResultLink: String(input.auditResultLink || input.audit_result_link || "").trim(),
-    keyInsight: String(input.keyInsight || input.key_insight || "").trim(),
-    upsellTarget: String(input.upsellTarget || input.upsell_target || "").trim(),
-    language: String(input.language || "").trim(),
-    userAgent: String(input.userAgent || "").trim()
-  };
+// Shared lead-intake module (lib/lead.js) is an ES module; server.js is
+// CommonJS (see package.json, no "type": "module") so it is consumed via a
+// cached dynamic import() instead of require(). This keeps the same
+// normalizeLead/validateLead/CSV/Telegram logic in one place across
+// server.js, the Cloudflare Worker example, and the Pages function instead
+// of three drifting copies.
+let leadLibPromise;
+function loadLeadLib() {
+  if (!leadLibPromise) leadLibPromise = import("./lib/lead.js");
+  return leadLibPromise;
+}
 
-  const missing = ["name", "contact", "company", "site", "data"].filter((key) => !lead[key]);
+async function normalizeLeadInput(input) {
+  const { normalizeLead, validateLead } = await loadLeadLib();
+  const lead = normalizeLead(input);
+  // Local demo backend additionally tracks manual audit follow-up fields
+  // that only exist once an operator works the lead (not on intake).
+  lead.auditResultLink = String(input.auditResultLink || input.audit_result_link || "").trim();
+  lead.keyInsight = String(input.keyInsight || input.key_insight || "").trim();
+  lead.upsellTarget = String(input.upsellTarget || input.upsell_target || "").trim();
+  lead.callsPerMonth = String(input.callsPerMonth || input.calls_per_month || "").trim();
+  const missing = validateLead(lead).map((code) => code.replace(/_required$/, ""));
   return { lead, missing };
 }
 
@@ -230,7 +226,7 @@ async function handleCreateLead(req, res) {
   try {
     const body = await readBody(req);
     const input = body ? JSON.parse(body) : {};
-    const { lead, missing } = normalizeLead(input);
+    const { lead, missing } = await normalizeLeadInput(input);
     if (missing.length) {
       sendJson(res, 400, { ok: false, error: "missing_required_fields", fields: missing });
       return;
@@ -238,10 +234,19 @@ async function handleCreateLead(req, res) {
 
     ensureDataDir();
     fs.appendFileSync(leadsPath, JSON.stringify(lead) + "\n", "utf8");
+
+    // Same Telegram notification behavior as the Cloudflare backends, so a
+    // lead submitted while running locally also reaches the operator.
+    const { sendTelegramLead } = await loadLeadLib();
+    const telegram = await sendTelegramLead(process.env, lead);
+
     sendJson(res, 201, {
       ok: true,
       leadId: lead.id,
       status: lead.status,
+      telegramSent: telegram.sent,
+      telegramError: telegram.error || null,
+      needsClarification: lead.needsClarification,
       message: "Lead saved locally"
     });
   } catch (error) {
@@ -263,25 +268,15 @@ function handleListLeads(res) {
   sendJson(res, 200, { ok: true, leads });
 }
 
-function handleLeadsCsv(res) {
+async function handleLeadsCsv(res) {
   const leads = readLeads();
-  const headers = ["createdAt", "status", "name", "role", "contact", "company", "site", "team", "pain", "data"];
-  const csv = [
-    headers.join(","),
-    ...leads.map((lead) => headers.map((key) => csvCell(lead[key] || "")).join(","))
-  ].join("\n");
+  const { leadsToCsv } = await loadLeadLib();
   res.writeHead(200, {
     "Content-Type": "text/csv; charset=utf-8",
     "Cache-Control": "no-store",
     "Content-Disposition": "attachment; filename=\"callcontrol-leads.csv\""
   });
-  res.end(csv);
-}
-
-function csvCell(value) {
-  const text = String(value ?? "");
-  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
-  return text;
+  res.end(leadsToCsv(leads));
 }
 
 async function handleUpdateLead(req, res, leadId) {

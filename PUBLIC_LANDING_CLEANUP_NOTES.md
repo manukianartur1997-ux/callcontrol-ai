@@ -20,6 +20,10 @@
 - `client.html`, `admin.html`, `online-leads.html`, `mini-audit-template.html` остаются в сборке.
 - `hybrid-demo.html` теперь повторяет чистый service landing, чтобы не возвращать пользователя в старую демо-витрину случайной ссылкой.
 
+## Обновление (2026-07-17)
+
+Аудит кода нашел, что `client.html`/`admin.html` были подключены в `dist/` и залинкованы из публичного лендинга (nav, hero, footer, "Demo system map", плюс floating-кнопка "Platform demo" на каждой странице), хотя они целиком завязаны на `server.js`-only роуты (`/api/dashboard`, `/api/state`, `/api/calls`, `/api/billing/*`), которых нет ни в Cloudflare Pages Function, ни в Cloudflare Worker. На проде это были мертвые ссылки на пустую нерабочую "админку". Исправлено: `client.html`/`admin.html` больше не копируются в `dist/` и публичный лендинг на них не ссылается (остается только рабочая `/platform/`, которая полностью статична и не дергает backend). Floating-кнопка "Platform demo" (дублировавшая уже существующую ссылку в hero/nav/footer) убрана. `client.html`/`admin.html` остаются как есть для локальной работы через `npm start`.
+
 ## Что уже исправлено в новой публичной сборке
 
 - RU/UK/EN страницы генерируются статически и не зависят от клиентского автоперевода старого HTML.

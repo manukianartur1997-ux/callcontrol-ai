@@ -146,7 +146,7 @@
         return '<a class="nav-link" href="#' + item[0] + '" data-route="' + item[0] + '"><span>' + escapeHtml(item[1]) + '</span><span>›</span></a>';
       }).join(""),
       "</nav>",
-      '<div class="sidebar-bottom">Static product demo · no real auth<br>Role: ' + escapeHtml(c.roles[role]) + '<br><a href="/">Landing</a> · <a href="/client.html">Client MVP</a></div>'
+      '<div class="sidebar-bottom">Static product demo · no real auth<br>Role: ' + escapeHtml(c.roles[role]) + '<br><a href="/">Landing</a></div>'
     ].join("");
   }
 
@@ -165,8 +165,6 @@
       '<div class="topbar-spacer"></div>',
       '<nav class="demo-links" aria-label="Demo routes">',
       '<a class="demo-link" href="/">Landing</a>',
-      '<a class="demo-link" href="/client.html">Client</a>',
-      '<a class="demo-link" href="/admin.html">Admin</a>',
       '<a class="demo-link demo-link--accent" href="/#request">Request audit</a>',
       "</nav>",
       '<div class="locale-switcher">',
