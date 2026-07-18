@@ -116,4 +116,15 @@ for (const file of ["dist/ru/index.html", "dist/uk/index.html", "dist/en/index.h
   assertIncludes(file, ".nav-links a:not(.nav-cta){display:none}");
 }
 
+// First-visit language auto-detect: every landing variant must ship the
+// pre-paint redirect script (saved cc:locale wins, navigator.languages
+// decides otherwise, English is the universal fallback) plus the lang-pill
+// handler that persists a manual choice.
+for (const file of ["dist/index.html", "dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html"]) {
+  assertIncludes(file, 'localStorage.getItem("cc:locale")');
+  assertIncludes(file, "navigator.languages");
+  assertIncludes(file, "location.replace");
+  assertIncludes(file, 'localStorage.setItem("cc:locale"');
+}
+
 console.log("Smoke check passed");
