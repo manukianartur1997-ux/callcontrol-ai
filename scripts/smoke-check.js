@@ -84,4 +84,36 @@ for (const file of ["dist/index.html", "dist/ru/index.html", "dist/uk/index.html
   assertIncludes(file, "calcTotal");
 }
 
+// The EN sample report must be the actual English report, not the RU one
+// (regression check: this pointed at b2b-saas-ru-sample-report.* before).
+assertIncludes("dist/en/index.html", "/samples/b2b-saas-en-sample-report.html");
+assertIncludes("dist/en/index.html", "/samples/b2b-saas-en-sample-report.pdf");
+assertExcludes("dist/en/index.html", "/samples/b2b-saas-ru-sample-report");
+assertIncludes("dist/samples/b2b-saas-en-sample-report.html", "Executive summary");
+assertRealPdf("dist/samples/b2b-saas-en-sample-report.pdf");
+
+// Comparison table: present on every locale, with the CallControl row plus
+// four named competitors (a couple more than the original three).
+for (const file of ["dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html"]) {
+  assertIncludes(file, 'id="compare"');
+  assertIncludes(file, "cmp-table");
+  assertIncludes(file, "Gong");
+  assertIncludes(file, "Fireflies");
+  assertIncludes(file, "Wingman");
+  assertIncludes(file, "Salesloft");
+}
+
+// Lead-form anti-spam: the honeypot field must ship on every locale (paired
+// with server-side filtering in lib/lead.js's spamReason).
+for (const file of ["dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html"]) {
+  assertIncludes(file, 'name="company_website"');
+  assertIncludes(file, "formElapsedMs");
+}
+
+// Mobile nav must keep the booking CTA reachable (regression check: this
+// used to hide the entire nav, CTA included, below 980px).
+for (const file of ["dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html"]) {
+  assertIncludes(file, ".nav-links a:not(.nav-cta){display:none}");
+}
+
 console.log("Smoke check passed");
