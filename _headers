@@ -3,7 +3,9 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
 
-/api/*
-  Access-Control-Allow-Origin: *
-  Access-Control-Allow-Methods: GET, POST, PATCH, PUT, OPTIONS
-  Access-Control-Allow-Headers: Content-Type, Authorization, X-App-Pin
+# CORS for /api/leads is set per-request by the Pages Function
+# (lib/lead.js -> corsHeadersFor): same-origin by default, widened only via
+# the ALLOWED_ORIGINS env var. We intentionally do NOT set a blanket
+# Access-Control-Allow-Origin: * here - that would let any third-party site
+# script submissions against the public lead endpoint and would override the
+# per-request lockdown above it.

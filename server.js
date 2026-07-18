@@ -204,6 +204,26 @@ function loadLeadLib() {
   return leadLibPromise;
 }
 
+// In-memory anti-spam rate limiter for local dev (no KV here). Built lazily
+// from the same lib/lead.js factory the Cloudflare backends' logic mirrors,
+// so tuning stays in one place.
+let leadRateLimiterPromise;
+async function isLeadRateLimited(ip) {
+  if (!leadRateLimiterPromise) {
+    leadRateLimiterPromise = loadLeadLib().then(({ createMemoryRateLimiter }) => createMemoryRateLimiter());
+  }
+  const limiter = await leadRateLimiterPromise;
+  return limiter(ip);
+}
+
+function requestIp(req) {
+  return (
+    String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+    req.socket?.remoteAddress ||
+    "unknown"
+  );
+}
+
 async function normalizeLeadInput(input) {
   const { normalizeLead, validateLead } = await loadLeadLib();
   const lead = normalizeLead(input);
@@ -226,6 +246,20 @@ async function handleCreateLead(req, res) {
   try {
     const body = await readBody(req);
     const input = body ? JSON.parse(body) : {};
+
+    // Mirrors the anti-spam behavior of the Cloudflare Pages Function /
+    // Worker so a lead submitted while running locally is filtered the same
+    // way. Return 200 "accepted" on a spam verdict so bots get no signal.
+    const { spamReason } = await loadLeadLib();
+    if (spamReason(input)) {
+      sendJson(res, 200, { ok: true, status: "ignored", message: "Lead accepted" });
+      return;
+    }
+    if (await isLeadRateLimited(requestIp(req))) {
+      sendJson(res, 429, { ok: false, error: "rate_limited", message: "Too many requests. Try again later." });
+      return;
+    }
+
     const { lead, missing } = await normalizeLeadInput(input);
     if (missing.length) {
       sendJson(res, 400, { ok: false, error: "missing_required_fields", fields: missing });
