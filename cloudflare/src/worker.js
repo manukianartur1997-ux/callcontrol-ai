@@ -37,7 +37,10 @@ export default {
 };
 
 function authorize(request, env) {
-  if (!env.ADMIN_TOKEN) return { ok: true };
+  // Fail closed: if ADMIN_TOKEN is not configured, nobody is authorized.
+  // (Previously this returned { ok: true } when unset, which opened every
+  // protected route - state, calls, billing, invites - to any caller.)
+  if (!env.ADMIN_TOKEN) return { ok: false };
   const url = new URL(request.url);
   const token = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") || request.headers.get("X-App-Pin") || url.searchParams.get("token");
   return { ok: token === env.ADMIN_TOKEN };
