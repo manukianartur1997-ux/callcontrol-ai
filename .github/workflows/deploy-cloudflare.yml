@@ -18,6 +18,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install dependencies
+        run: npm ci
       - name: Build static assets
         run: node build-pages.js
       - name: Check Cloudflare secrets are present
