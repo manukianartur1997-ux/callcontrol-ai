@@ -13,3 +13,4 @@ build/
 .dev.vars
 *.log
 *.zip
+SECRETS_TO_SET.md
