@@ -126,7 +126,7 @@ function renderSampleReportHtml(report, meta) {
   <main>
     <div class="top">
       <div>
-        <div class="brand">CallControl AI · Sample Report</div>
+        <div class="brand">${esc(meta.brandLabel)}</div>
         <h1>${esc(report.title)}</h1>
         <span class="note">${esc(report.note)}</span>
       </div>
@@ -154,7 +154,7 @@ function renderSampleReportPdf(report, meta) {
     doc.on("error", reject);
 
     doc.font(FONTS.bold).fontSize(9).fillColor(COLORS.blue)
-      .text("CALLCONTROL AI · SAMPLE REPORT", { characterSpacing: 1.2 });
+      .text(String(meta.brandLabel || "CallControl AI · Sample Report").toUpperCase(), { characterSpacing: 1.2 });
     doc.moveDown(0.4);
     doc.font(FONTS.bold).fontSize(22).fillColor(COLORS.ink).text(report.title);
     doc.moveDown(0.3);
@@ -220,13 +220,15 @@ async function generateSampleReports(samplesDir, samples, localeMeta) {
       downloadLabel: meta.downloadLabel,
       requestHref: meta.requestHref,
       requestLabel: meta.requestLabel,
-      footerNote: meta.footerNote
+      footerNote: meta.footerNote,
+      brandLabel: meta.brandLabel
     });
     fs.writeFileSync(path.join(samplesDir, `${baseName}.html`), html);
 
     const pdf = await renderSampleReportPdf(report, {
       footerNote: meta.footerNote,
-      requestUrl: meta.requestUrl
+      requestUrl: meta.requestUrl,
+      brandLabel: meta.brandLabel
     });
     fs.writeFileSync(path.join(samplesDir, `${baseName}.pdf`), pdf);
   }
