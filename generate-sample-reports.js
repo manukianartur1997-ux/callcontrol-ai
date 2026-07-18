@@ -10,6 +10,7 @@
 const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
+const { SITE_ORIGIN, OG_IMAGE_PATH, FAVICON, BEACON_SCRIPT } = require("./lib/site-meta.cjs");
 
 // pdfkit's built-in "Helvetica" etc. are the 14 standard PDF fonts, which
 // only support WinAnsi (Latin-1) glyphs - they silently cannot render
@@ -98,6 +99,18 @@ function renderSampleReportHtml(report, meta) {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${esc(report.title)}</title>
   <meta name="description" content="${esc(report.note)}" />
+  <link rel="icon" href="${FAVICON}" />
+  <link rel="canonical" href="${SITE_ORIGIN}${esc(meta.htmlHref)}" />
+  <meta property="og:site_name" content="CallControl AI" />
+  <meta property="og:title" content="${esc(report.title)}" />
+  <meta property="og:description" content="${esc(report.note)}" />
+  <meta property="og:type" content="article" />
+  <meta property="og:url" content="${SITE_ORIGIN}${esc(meta.htmlHref)}" />
+  <meta property="og:image" content="${SITE_ORIGIN}${OG_IMAGE_PATH}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="${SITE_ORIGIN}${OG_IMAGE_PATH}" />
   <style>
     @page { size: A4; margin: 12mm; }
     :root { --bg:${COLORS.bg}; --ink:${COLORS.ink}; --muted:${COLORS.muted}; --line:${COLORS.line}; --blue:${COLORS.blue}; --red:${COLORS.red}; --card:${COLORS.card}; }
@@ -141,6 +154,7 @@ function renderSampleReportHtml(report, meta) {
       <a class="cta" href="${esc(meta.requestHref)}">${esc(meta.requestLabel)}</a>
     </div>
   </main>
+  ${BEACON_SCRIPT}
 </body>
 </html>`;
 }
@@ -214,6 +228,7 @@ async function generateSampleReports(samplesDir, samples, localeMeta) {
 
     const html = renderSampleReportHtml(report, {
       lang: meta.lang,
+      htmlHref: `/samples/${baseName}.html`,
       pdfHref: `/samples/${baseName}.pdf`,
       backHref: meta.backHref,
       backLabel: meta.backLabel,

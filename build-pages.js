@@ -17,7 +17,10 @@ const files = [
   "README.md",
   "PUBLISH_NOW.md",
   "DEPLOYMENT_CHECKLIST.md",
-  "_headers"
+  "_headers",
+  // 1200x630 share card referenced by every page's og:image/twitter:image
+  // (absolute URL built in lib/site-meta.js).
+  "og-image.png"
 ];
 
 function copyDir(sourceDir, targetDir) {

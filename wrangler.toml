@@ -6,3 +6,10 @@ compatibility_date = "2026-05-12"
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+
+# First-party page-view analytics (POST /api/beacon in the worker). Workers
+# Analytics Engine needs no external account/site setup and stores no
+# cookies/IPs; query it later via the SQL API (see README "Analytics").
+[[analytics_engine_datasets]]
+binding = "PAGEVIEWS"
+dataset = "callcontrol_pageviews"

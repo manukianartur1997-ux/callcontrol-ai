@@ -20,6 +20,10 @@ export default {
     if (request.method === "OPTIONS") return json({ ok: true }, 204, cors);
     if (url.pathname === "/api/health") return json({ ok: true, runtime: "cloudflare-worker-assets" }, 200, cors);
 
+    if (request.method === "POST" && url.pathname === "/api/beacon") {
+      return recordBeacon(request, env, cors);
+    }
+
     if (request.method === "POST" && url.pathname === "/api/leads") {
       return createLead(request, env, cors);
     }
@@ -75,6 +79,31 @@ async function createLead(request, env, cors) {
   } catch (error) {
     return json({ ok: false, error: "lead_create_failed" }, 500, cors);
   }
+}
+
+// Privacy-sane first-party page-view beacon. No cookies, no IDs, and no
+// IP/user-agent stored - only the page path, the referrer's origin, the page
+// language, and a coarse device-width bucket (s/m/l), written to the
+// PAGEVIEWS Workers Analytics Engine dataset (see wrangler.toml
+// [[analytics_engine_datasets]]). Always answers 204 - analytics must never
+// surface errors to the page - and degrades to a no-op when the binding is
+// absent (e.g. a config without the dataset).
+async function recordBeacon(request, env, cors) {
+  try {
+    if (env.PAGEVIEWS) {
+      const input = await request.json().catch(() => ({}));
+      const clip = (value, max) => String(value == null ? "" : value).slice(0, max);
+      const pagePath = clip(input.path, 256) || "/";
+      env.PAGEVIEWS.writeDataPoint({
+        blobs: [pagePath, clip(input.ref, 256), clip(input.lang, 16), clip(input.vw, 4)],
+        doubles: [1],
+        indexes: [pagePath.slice(0, 96)]
+      });
+    }
+  } catch (_) {
+    // Swallow everything: a broken beacon must not become a broken page.
+  }
+  return new Response(null, { status: 204, headers: cors });
 }
 
 async function listLeads(request, env, cors) {

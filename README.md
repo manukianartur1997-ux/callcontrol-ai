@@ -131,6 +131,38 @@ APP_PIN=1234 node server.js
 
 Если задан `APP_PIN`, защищенные API принимают заголовок `X-App-Pin` или query `?pin=...`.
 
+## Аналитика (first-party beacon, без cookies)
+
+Публичные страницы (лендинги, `/platform/`, sample-отчёты) шлют fire-and-forget
+`POST /api/beacon` при загрузке — сниппет живёт в `lib/site-meta.cjs`
+(`BEACON_SCRIPT`) и вставляется генераторами, так что rebuild воспроизводит его.
+Privacy-sane by design: без cookies, без ID, IP и user-agent не сохраняются —
+только `path`, origin реферера, язык страницы и грубый бакет ширины экрана
+(`s`/`m`/`l`). Рендер страницы beacon не блокирует (инлайн в конце `<body>`,
+`navigator.sendBeacon` + fallback `fetch keepalive`, всё в try/catch).
+
+Worker (`cloudflare-worker.example.js` → `recordBeacon`) пишет события в
+Workers Analytics Engine dataset `callcontrol_pageviews`
+(binding `PAGEVIEWS`, см. `wrangler.toml`). Локальный `server.js` отвечает
+204-заглушкой. Cloudflare Web Analytics не используется (OAuth-токен wrangler
+не имеет `rum`-scope), Google Analytics/GTM — сознательно нет.
+
+Как посмотреть данные — SQL API Analytics Engine
+(`ACCOUNT_ID=55c8c0ba46ac72961fae28f92b50403e`, токен с правом Account
+Analytics Read):
+
+```bash
+curl -s "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/analytics_engine/sql" \
+  -H "Authorization: Bearer $CF_API_TOKEN" \
+  --data "SELECT blob1 AS path, count() AS views
+          FROM callcontrol_pageviews
+          WHERE timestamp > NOW() - INTERVAL '7' DAY
+          GROUP BY path ORDER BY views DESC"
+```
+
+Схема точки: `blob1` = path, `blob2` = referrer origin, `blob3` = язык,
+`blob4` = width bucket, `double1` = 1 (счётчик), `index1` = path.
+
 ## Ручной MVP workflow
 
 1. Клиент оставляет заявку в форме.

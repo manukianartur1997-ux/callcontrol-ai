@@ -1312,6 +1312,16 @@ const server = http.createServer((req, res) => {
     handleCreateLead(req, res);
     return;
   }
+  if (req.method === "POST" && url.pathname === "/api/beacon") {
+    // Local no-op mirror of the Worker's Analytics Engine beacon endpoint
+    // (cloudflare-worker.example.js -> recordBeacon): accept and discard so
+    // the pages' fire-and-forget page-view ping doesn't hit the PIN gate
+    // below and log 401s during local dev.
+    req.resume();
+    res.writeHead(204);
+    res.end();
+    return;
+  }
   if (url.pathname.startsWith("/api/") && !requireAppPin(req, res)) {
     return;
   }

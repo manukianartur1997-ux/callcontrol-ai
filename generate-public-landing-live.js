@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { generateSampleReports } = require("./generate-sample-reports");
+const { SITE_ORIGIN, OG_IMAGE_PATH, FAVICON, BEACON_SCRIPT } = require("./lib/site-meta.cjs");
 
 const outDir = path.join(__dirname, "dist");
 const samples = {
@@ -30,21 +31,6 @@ const sampleLocaleMeta = {
   }
 };
 sampleLocaleMeta.default = sampleLocaleMeta["b2b-saas-ru-sample-report.md"];
-
-// Inline SVG favicon (same teal->indigo brand gradient as the primary
-// button) as a data URI. Avoids a 404 on /favicon.ico without adding an
-// extra build asset.
-const FAVICON =
-  "data:image/svg+xml," +
-  encodeURIComponent(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">' +
-      '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">' +
-      '<stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#4f46e5"/>' +
-      "</linearGradient></defs>" +
-      '<rect width="64" height="64" rx="15" fill="url(#g)"/>' +
-      '<path d="M42 24a13 13 0 1 0 0 16" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round"/>' +
-      "</svg>"
-  );
 
 const copy = {
   ru: {
@@ -224,7 +210,20 @@ function render(locale) {
     return `<tr class="${i === 0 ? "cmp-own" : ""}">${cells}</tr>`;
   }).join("");
   const compareTable = `<div class="cmp-wrap reveal"><table class="cmp-table"><caption class="sr-only">${esc(t.compareTitle)}</caption><thead>${compareHead}</thead><tbody>${compareBody}</tbody></table></div>`;
-  const ogLocale = locale === "ru" ? "ru_RU" : locale === "uk" ? "uk_UA" : "en_US";
+  const ogLocaleOf = (l) => (l === "ru" ? "ru_RU" : l === "uk" ? "uk_UA" : "en_US");
+  const canonical = SITE_ORIGIN + url(locale);
+  const ogImage = SITE_ORIGIN + OG_IMAGE_PATH;
+  // Canonical + hreflang. dist/index.html and dist/hybrid-demo.html are
+  // byte-identical copies of the ru render, so their canonical points at
+  // /ru/ - exactly the duplicate-consolidation hint search engines expect.
+  // x-default is the root, whose pre-paint script picks the visitor's
+  // language.
+  const hreflangs =
+    ["ru", "uk", "en"].map((l) => `<link rel="alternate" hreflang="${l}" href="${SITE_ORIGIN}${url(l)}"/>`).join("") +
+    `<link rel="alternate" hreflang="x-default" href="${SITE_ORIGIN}/"/>`;
+  // OG/Twitter tags use the locale's real positioning copy (t.title/t.desc);
+  // the share image is one static 1200x630 card for all locales.
+  const seoHead = `<link rel="canonical" href="${canonical}"/>${hreflangs}<meta property="og:site_name" content="CallControl AI"/><meta property="og:title" content="${esc(t.title)}"/><meta property="og:description" content="${esc(t.desc)}"/><meta property="og:type" content="website"/><meta property="og:url" content="${canonical}"/><meta property="og:locale" content="${ogLocaleOf(locale)}"/>${["ru", "uk", "en"].filter((l) => l !== locale).map((l) => `<meta property="og:locale:alternate" content="${ogLocaleOf(l)}"/>`).join("")}<meta property="og:image" content="${ogImage}"/><meta property="og:image:width" content="1200"/><meta property="og:image:height" content="630"/><meta property="og:image:alt" content="CallControl AI — ${esc(t.h1)}"/><meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="${esc(t.title)}"/><meta name="twitter:description" content="${esc(t.desc)}"/><meta name="twitter:image" content="${ogImage}"/>`;
   // First-visit language auto-detect. Sits first in <head> so a redirect
   // happens before anything paints. Rules: a saved manual choice (cc:locale,
   // the same key the platform demo persists through STATE.setLocale) always
@@ -241,7 +240,7 @@ function render(locale) {
   // never fights the user again (and the platform demo opens in the same
   // language). Plain anchors keep working without JS.
   const langSaveScript = `<script>(function(){var pills=document.querySelectorAll(".lang-pill");for(var i=0;i<pills.length;i++){pills[i].addEventListener("click",function(){try{localStorage.setItem("cc:locale",this.getAttribute("hreflang"))}catch(e){}})}})();</script>`;
-  return `<!doctype html><html lang="${t.lang}"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>${detectScript}<title>${esc(t.title)}</title><meta name="description" content="${esc(t.desc)}"/><meta name="theme-color" content="#020617"/><link rel="icon" href="${FAVICON}"/><link rel="apple-touch-icon" href="${FAVICON}"/><meta property="og:title" content="${esc(t.title)}"/><meta property="og:description" content="${esc(t.desc)}"/><meta property="og:type" content="website"/><meta property="og:locale" content="${ogLocale}"/><link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><style>${css()}</style></head><body><header class="topbar"><div class="wrap nav"><a class="brand" href="${url(locale)}"><strong>CallControl AI</strong><span>${esc(t.badge)}</span></a><nav class="nav-links" aria-label="${esc(navLabel)}"><a href="#process">${esc(t.nav[0])}</a><a href="#sample">${esc(t.nav[1])}</a><a href="#compare">${esc(t.compareNav)}</a><a href="#pricing">${esc(t.nav[2])}</a><a href="/platform/">${esc(t.platformLabel)}</a><a class="nav-cta" href="#request">${esc(t.nav[4])}</a></nav><div class="lang-switch" role="navigation" aria-label="${esc(langSwitchLabel)}">${langs}</div></div></header><main><section class="hero"><div class="wrap hero-grid"><div><span class="badge">${esc(t.badge)}</span><h1>${esc(t.h1)}</h1><p class="hero-lead">${esc(t.lead)}</p><div class="actions"><a class="button primary" href="#request">${esc(t.cta)}</a><a class="button secondary" href="/platform/">${esc(t.platformDemo)}</a></div><div class="trust-grid">${trust}</div></div><aside class="proof-card"><h2>${esc(t.proofTitle)}</h2>${proof}</aside></div></section><section id="sample"><div class="wrap sample-layout"><article class="sample-preview"><small>${esc(t.sampleEyebrow)}</small><h3>${esc(t.sampleTitle)}</h3><p>${esc(t.sampleLead)}</p><div class="sample-list">${sampleMetrics}</div><div class="actions"><a class="button primary" href="${t.sampleFile}">${esc(t.sample)}</a><a class="button secondary" href="${t.samplePdf}" download>${esc(t.samplePdfLabel)}</a></div></article><div class="sample-side"><div class="section-head"><h2>${esc(t.sampleTitle)}</h2><p>${esc(t.sampleLead)}</p><div class="sample-note">${esc(t.sampleNote)}</div></div><div class="grid-4">${mini(t.cards)}</div></div></div></section><section id="process"><div class="wrap"><div class="section-head"><h2>${esc(t.processTitle)}</h2><p>${esc(t.processLead)}</p></div><div class="grid-4">${steps}</div></div></section><section><div class="wrap two-col"><div class="section-head"><h2>${esc(t.leakTitle)}</h2><p>${esc(t.leakLead)}</p></div><div class="leak-stack">${leaks}</div></div></section><section id="compare"><div class="wrap"><div class="section-head"><h2>${esc(t.compareTitle)}</h2><p>${esc(t.compareLead)}</p></div>${compareTable}<p class="cmp-note">${esc(t.compareNote)}</p></div></section><section id="pricing"><div class="wrap"><div class="section-head"><h2>${esc(t.pricingTitle)}</h2><p>${esc(t.pricingLead)}</p></div><div class="pricing-grid">${tiers}</div><div class="form-card calc-card"><div class="section-head"><h2>${esc(t.calcTitle)}</h2><p>${esc(t.calcLead)}</p></div><div class="calc-grid"><div class="calc-main"><div class="calc-row"><label for="calcCalls">${esc(t.calcCallsLabel)}</label><b id="calcCallsValue" class="price">20</b></div><input type="range" id="calcCalls" min="10" max="120" step="5" value="20"><div class="calc-addons">${calcAddonsHtml}</div></div><div class="calc-total"><span>${esc(t.calcTotalLabel)}</span><strong id="calcTotal" class="price">$700</strong><p class="calc-note">${esc(t.calcNote)}</p><a class="button primary" href="#request" id="calcCta">${esc(t.calcCta)}</a></div></div></div></div></section><section><div class="wrap"><div class="section-head"><h2>${esc(t.futureTitle)}</h2><p>${esc(t.futureLead)}</p></div><div class="future-grid">${mini(t.future)}</div><p class="future-note">${esc(t.futureNote)}</p></div></section><section id="faq"><div class="wrap"><div class="section-head"><h2>${esc(t.faqTitle)}</h2></div><div class="faq-grid">${faq}</div></div></section><section id="request"><div class="wrap"><div class="form-card"><div class="section-head"><h2>${esc(t.formTitle)}</h2><p>${esc(t.formLead)}</p></div><form id="leadForm"><div class="form-grid">${fields(t)}</div><div class="actions"><button class="button primary" type="submit">${esc(t.send)}</button></div><div class="form-status" id="formStatus"></div><p class="privacy">${esc(t.privacy)}</p></form></div></div></section></main><footer class="footer"><div class="wrap footer-inner"><span>${esc(t.footer)}</span><span>Telegram: @manukianartur1997 · <a href="/platform/">${esc(t.platformLabel)}</a></span></div></footer><script>(function(){const ok=${JSON.stringify(t.ok)},fail=${JSON.stringify(t.fail)},sending=${JSON.stringify(t.sending)},send=${JSON.stringify(t.send)};const started=Date.now();const f=document.querySelector("#leadForm"),s=document.querySelector("#formStatus");f.addEventListener("submit",async(e)=>{e.preventDefault();const b=f.querySelector("button");b.disabled=true;b.textContent=sending;s.innerHTML="";const p=Object.fromEntries(new FormData(f).entries());p.source="callcontrol-public-landing";p.locale=${JSON.stringify(locale)};p.formElapsedMs=Date.now()-started;try{const r=await fetch("/api/leads",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});if(!r.ok)throw new Error("request_failed");s.innerHTML="<strong>"+ok[0]+"</strong><br>"+ok[1];f.reset()}catch(_){s.innerHTML="<strong>"+fail[0]+"</strong><br>"+fail[1]}finally{b.disabled=false;b.textContent=send}})})();</script><script>(function(){const calls=document.querySelector("#calcCalls");if(!calls)return;const callsValue=document.querySelector("#calcCallsValue"),total=document.querySelector("#calcTotal"),addons=document.querySelectorAll("[data-calc-addon]");function baseForCalls(n){if(n<=20)return 700;if(n<=40)return 700+(n-20)*40;if(n<=80)return 1500+(n-40)*37.5;return 3000+(n-80)*30}function recompute(){const n=Number(calls.value);callsValue.textContent=n;let sum=baseForCalls(n);const picked={};addons.forEach((box)=>{picked[box.dataset.calcAddon]=box.checked});if(picked.rush)sum*=1.2;if(picked.coaching)sum+=150;if(picked.followup)sum+=150;if(picked.locale)sum+=100;total.textContent="$"+Math.round(sum).toLocaleString("en-US")}calls.addEventListener("input",recompute);addons.forEach((box)=>box.addEventListener("change",recompute));recompute()})()</script>${langSaveScript}</body></html>`;
+  return `<!doctype html><html lang="${t.lang}"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>${detectScript}<title>${esc(t.title)}</title><meta name="description" content="${esc(t.desc)}"/><meta name="theme-color" content="#020617"/><link rel="icon" href="${FAVICON}"/><link rel="apple-touch-icon" href="${FAVICON}"/>${seoHead}<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><style>${css()}</style></head><body><header class="topbar"><div class="wrap nav"><a class="brand" href="${url(locale)}"><strong>CallControl AI</strong><span>${esc(t.badge)}</span></a><nav class="nav-links" aria-label="${esc(navLabel)}"><a href="#process">${esc(t.nav[0])}</a><a href="#sample">${esc(t.nav[1])}</a><a href="#compare">${esc(t.compareNav)}</a><a href="#pricing">${esc(t.nav[2])}</a><a href="/platform/">${esc(t.platformLabel)}</a><a class="nav-cta" href="#request">${esc(t.nav[4])}</a></nav><div class="lang-switch" role="navigation" aria-label="${esc(langSwitchLabel)}">${langs}</div></div></header><main><section class="hero"><div class="wrap hero-grid"><div><span class="badge">${esc(t.badge)}</span><h1>${esc(t.h1)}</h1><p class="hero-lead">${esc(t.lead)}</p><div class="actions"><a class="button primary" href="#request">${esc(t.cta)}</a><a class="button secondary" href="/platform/">${esc(t.platformDemo)}</a></div><div class="trust-grid">${trust}</div></div><aside class="proof-card"><h2>${esc(t.proofTitle)}</h2>${proof}</aside></div></section><section id="sample"><div class="wrap sample-layout"><article class="sample-preview"><small>${esc(t.sampleEyebrow)}</small><h3>${esc(t.sampleTitle)}</h3><p>${esc(t.sampleLead)}</p><div class="sample-list">${sampleMetrics}</div><div class="actions"><a class="button primary" href="${t.sampleFile}">${esc(t.sample)}</a><a class="button secondary" href="${t.samplePdf}" download>${esc(t.samplePdfLabel)}</a></div></article><div class="sample-side"><div class="section-head"><h2>${esc(t.sampleTitle)}</h2><p>${esc(t.sampleLead)}</p><div class="sample-note">${esc(t.sampleNote)}</div></div><div class="grid-4">${mini(t.cards)}</div></div></div></section><section id="process"><div class="wrap"><div class="section-head"><h2>${esc(t.processTitle)}</h2><p>${esc(t.processLead)}</p></div><div class="grid-4">${steps}</div></div></section><section><div class="wrap two-col"><div class="section-head"><h2>${esc(t.leakTitle)}</h2><p>${esc(t.leakLead)}</p></div><div class="leak-stack">${leaks}</div></div></section><section id="compare"><div class="wrap"><div class="section-head"><h2>${esc(t.compareTitle)}</h2><p>${esc(t.compareLead)}</p></div>${compareTable}<p class="cmp-note">${esc(t.compareNote)}</p></div></section><section id="pricing"><div class="wrap"><div class="section-head"><h2>${esc(t.pricingTitle)}</h2><p>${esc(t.pricingLead)}</p></div><div class="pricing-grid">${tiers}</div><div class="form-card calc-card"><div class="section-head"><h2>${esc(t.calcTitle)}</h2><p>${esc(t.calcLead)}</p></div><div class="calc-grid"><div class="calc-main"><div class="calc-row"><label for="calcCalls">${esc(t.calcCallsLabel)}</label><b id="calcCallsValue" class="price">20</b></div><input type="range" id="calcCalls" min="10" max="120" step="5" value="20"><div class="calc-addons">${calcAddonsHtml}</div></div><div class="calc-total"><span>${esc(t.calcTotalLabel)}</span><strong id="calcTotal" class="price">$700</strong><p class="calc-note">${esc(t.calcNote)}</p><a class="button primary" href="#request" id="calcCta">${esc(t.calcCta)}</a></div></div></div></div></section><section><div class="wrap"><div class="section-head"><h2>${esc(t.futureTitle)}</h2><p>${esc(t.futureLead)}</p></div><div class="future-grid">${mini(t.future)}</div><p class="future-note">${esc(t.futureNote)}</p></div></section><section id="faq"><div class="wrap"><div class="section-head"><h2>${esc(t.faqTitle)}</h2></div><div class="faq-grid">${faq}</div></div></section><section id="request"><div class="wrap"><div class="form-card"><div class="section-head"><h2>${esc(t.formTitle)}</h2><p>${esc(t.formLead)}</p></div><form id="leadForm"><div class="form-grid">${fields(t)}</div><div class="actions"><button class="button primary" type="submit">${esc(t.send)}</button></div><div class="form-status" id="formStatus"></div><p class="privacy">${esc(t.privacy)}</p></form></div></div></section></main><footer class="footer"><div class="wrap footer-inner"><span>${esc(t.footer)}</span><span>Telegram: @manukianartur1997 · <a href="/platform/">${esc(t.platformLabel)}</a></span></div></footer><script>(function(){const ok=${JSON.stringify(t.ok)},fail=${JSON.stringify(t.fail)},sending=${JSON.stringify(t.sending)},send=${JSON.stringify(t.send)};const started=Date.now();const f=document.querySelector("#leadForm"),s=document.querySelector("#formStatus");f.addEventListener("submit",async(e)=>{e.preventDefault();const b=f.querySelector("button");b.disabled=true;b.textContent=sending;s.innerHTML="";const p=Object.fromEntries(new FormData(f).entries());p.source="callcontrol-public-landing";p.locale=${JSON.stringify(locale)};p.formElapsedMs=Date.now()-started;try{const r=await fetch("/api/leads",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});if(!r.ok)throw new Error("request_failed");s.innerHTML="<strong>"+ok[0]+"</strong><br>"+ok[1];f.reset()}catch(_){s.innerHTML="<strong>"+fail[0]+"</strong><br>"+fail[1]}finally{b.disabled=false;b.textContent=send}})})();</script><script>(function(){const calls=document.querySelector("#calcCalls");if(!calls)return;const callsValue=document.querySelector("#calcCallsValue"),total=document.querySelector("#calcTotal"),addons=document.querySelectorAll("[data-calc-addon]");function baseForCalls(n){if(n<=20)return 700;if(n<=40)return 700+(n-20)*40;if(n<=80)return 1500+(n-40)*37.5;return 3000+(n-80)*30}function recompute(){const n=Number(calls.value);callsValue.textContent=n;let sum=baseForCalls(n);const picked={};addons.forEach((box)=>{picked[box.dataset.calcAddon]=box.checked});if(picked.rush)sum*=1.2;if(picked.coaching)sum+=150;if(picked.followup)sum+=150;if(picked.locale)sum+=100;total.textContent="$"+Math.round(sum).toLocaleString("en-US")}calls.addEventListener("input",recompute);addons.forEach((box)=>box.addEventListener("change",recompute));recompute()})()</script>${langSaveScript}${BEACON_SCRIPT}</body></html>`;
 }
 
 function css() {
@@ -262,5 +261,36 @@ module.exports = async function generatePublicLandingLive() {
     fs.writeFileSync(path.join(outDir, locale, "index.html"), html);
   }
   fs.writeFileSync(path.join(outDir, "hybrid-demo.html"), render("ru"));
+
+  // robots.txt + sitemap.xml. Internal/duplicate pages (operator screen,
+  // legacy demo, the ru duplicate hybrid-demo, the print template) are kept
+  // out of the index; the sitemap lists only the canonical public pages.
+  const sitemapPaths = [
+    "/",
+    "/ru/",
+    "/uk/",
+    "/en/",
+    "/platform/",
+    ...Object.keys(samples).map((file) => `/samples/${file.replace(/\.md$/, ".html")}`)
+  ];
+  const sitemap =
+    '<?xml version="1.0" encoding="UTF-8"?>\n' +
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n' +
+    sitemapPaths.map((p) => `  <url><loc>${SITE_ORIGIN}${p}</loc></url>`).join("\n") +
+    "\n</urlset>\n";
+  fs.writeFileSync(path.join(outDir, "sitemap.xml"), sitemap);
+  const robots = [
+    "User-agent: *",
+    "Allow: /",
+    "Disallow: /legacy-demo.html",
+    "Disallow: /online-leads.html",
+    "Disallow: /hybrid-demo.html",
+    "Disallow: /mini-audit-template.html",
+    "",
+    `Sitemap: ${SITE_ORIGIN}/sitemap.xml`,
+    ""
+  ].join("\n");
+  fs.writeFileSync(path.join(outDir, "robots.txt"), robots);
+
   console.log("Public service landing ready: dist/index.html, dist/ru/index.html, dist/uk/index.html, dist/en/index.html");
 };

@@ -25,6 +25,20 @@ function assertMissing(file) {
   }
 }
 
+function assertPngSize(file, width, height) {
+  const buffer = fs.readFileSync(file);
+  if (buffer.slice(0, 8).toString("latin1") !== "\x89PNG\r\n\x1a\n") {
+    throw new Error(`${file} does not start with a PNG signature`);
+  }
+  // IHDR is always the first chunk: width/height are big-endian uint32 at
+  // byte offsets 16 and 20.
+  const actualWidth = buffer.readUInt32BE(16);
+  const actualHeight = buffer.readUInt32BE(20);
+  if (actualWidth !== width || actualHeight !== height) {
+    throw new Error(`${file} is ${actualWidth}x${actualHeight}, expected ${width}x${height}`);
+  }
+}
+
 function assertRealPdf(file) {
   const buffer = fs.readFileSync(file);
   if (buffer.length < 1000) {
@@ -126,5 +140,52 @@ for (const file of ["dist/index.html", "dist/ru/index.html", "dist/uk/index.html
   assertIncludes(file, "location.replace");
   assertIncludes(file, 'localStorage.setItem("cc:locale"');
 }
+
+// OG/SEO: every landing variant must carry canonical + hreflang + OG/Twitter
+// tags with absolute URLs, and the share image must be a real 1200x630 PNG.
+const SITE_ORIGIN = "https://callcontrol-ai-demo.manukianartur1997.workers.dev";
+for (const file of ["dist/index.html", "dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html", "dist/hybrid-demo.html"]) {
+  assertIncludes(file, 'rel="canonical"');
+  assertIncludes(file, 'hreflang="x-default"');
+  assertIncludes(file, `<meta property="og:image" content="${SITE_ORIGIN}/og-image.png"/>`);
+  assertIncludes(file, '<meta property="og:image:width" content="1200"/>');
+  assertIncludes(file, '<meta property="og:image:height" content="630"/>');
+  assertIncludes(file, '<meta name="twitter:card" content="summary_large_image"/>');
+}
+// Per-locale canonical/og:url + localized og:title (dist/index.html and
+// hybrid-demo.html are ru copies, so their canonical points at /ru/).
+assertIncludes("dist/index.html", `<link rel="canonical" href="${SITE_ORIGIN}/ru/"/>`);
+assertIncludes("dist/hybrid-demo.html", `<link rel="canonical" href="${SITE_ORIGIN}/ru/"/>`);
+for (const locale of ["ru", "uk", "en"]) {
+  assertIncludes(`dist/${locale}/index.html`, `<link rel="canonical" href="${SITE_ORIGIN}/${locale}/"/>`);
+  assertIncludes(`dist/${locale}/index.html`, `<meta property="og:url" content="${SITE_ORIGIN}/${locale}/"/>`);
+}
+assertIncludes("dist/ru/index.html", '<meta property="og:title" content="CallControl AI — аудит звонков отдела продаж"/>');
+assertIncludes("dist/uk/index.html", '<meta property="og:title" content="CallControl AI — аудит дзвінків відділу продажів"/>');
+assertIncludes("dist/en/index.html", '<meta property="og:title" content="CallControl AI — sales call audit"/>');
+assertPngSize("dist/og-image.png", 1200, 630);
+
+// Sample report pages share the OG card and declare their own canonical.
+assertIncludes("dist/samples/b2b-saas-en-sample-report.html", `<link rel="canonical" href="${SITE_ORIGIN}/samples/b2b-saas-en-sample-report.html" />`);
+assertIncludes("dist/samples/b2b-saas-en-sample-report.html", 'content="summary_large_image"');
+
+// robots.txt + sitemap.xml: canonical public pages only; internal/duplicate
+// pages stay out of the index.
+assertIncludes("dist/robots.txt", `Sitemap: ${SITE_ORIGIN}/sitemap.xml`);
+assertIncludes("dist/robots.txt", "Disallow: /online-leads.html");
+for (const p of ["/ru/", "/uk/", "/en/", "/platform/", "/samples/b2b-saas-en-sample-report.html"]) {
+  assertIncludes("dist/sitemap.xml", `<loc>${SITE_ORIGIN}${p}</loc>`);
+}
+assertExcludes("dist/sitemap.xml", "hybrid-demo");
+
+// First-party analytics beacon: fire-and-forget client ping on every public
+// page + the /api/beacon Analytics Engine endpoint in the worker.
+for (const file of ["dist/index.html", "dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html", "dist/platform/index.html", "dist/samples/b2b-saas-en-sample-report.html"]) {
+  assertIncludes(file, '"/api/beacon"');
+  assertIncludes(file, "sendBeacon");
+}
+assertIncludes("cloudflare-worker.example.js", "/api/beacon");
+assertIncludes("cloudflare-worker.example.js", "writeDataPoint");
+assertIncludes("wrangler.toml", "analytics_engine_datasets");
 
 console.log("Smoke check passed");
