@@ -188,4 +188,69 @@ assertIncludes("cloudflare-worker.example.js", "/api/beacon");
 assertIncludes("cloudflare-worker.example.js", "writeDataPoint");
 assertIncludes("wrangler.toml", "analytics_engine_datasets");
 
+// MONEY REPORT: the lost-revenue hero computation (dropped/under-pushed
+// leads × average check = $X/month) must ship on every locale as an
+// editable-looking worked example, and the sample reports must carry the
+// same explicit computation instead of a floating Value-at-Risk number.
+for (const file of ["dist/index.html", "dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html"]) {
+  assertIncludes(file, 'id="mcLeads"');
+  assertIncludes(file, 'id="mcLost"');
+  assertIncludes(file, 'id="mcCheck"');
+  assertIncludes(file, 'id="mcResult"');
+  assertIncludes(file, "$8,400");
+}
+assertIncludes("dist/samples/edtech-ua-sample-report.md", "28 втрачених лідів × $300");
+assertIncludes("dist/samples/b2b-saas-ru-sample-report.md", "28 потерянных лидов × $300");
+assertIncludes("dist/samples/b2b-saas-en-sample-report.md", "28 lost leads × $300");
+assertIncludes("dist/samples/edtech-ua-sample-report.html", "$8,400");
+assertIncludes("dist/samples/b2b-saas-ru-sample-report.html", "$8,400");
+assertIncludes("dist/samples/b2b-saas-en-sample-report.html", "Lost revenue (Value at Risk)");
+
+// TRIPWIRE OFFER: the entry rung above the three tiers plus the calculator
+// mode switch. The price stays a visibly bracketed placeholder until Artur
+// confirms the range.
+assertIncludes("dist/ru/index.html", "Экспресс-срез");
+assertIncludes("dist/uk/index.html", "Експрес-зріз");
+assertIncludes("dist/en/index.html", "Express Snapshot");
+for (const file of ["dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html"]) {
+  assertIncludes(file, "tripwire-card");
+  assertIncludes(file, "[$300–500]");
+  assertIncludes(file, 'name="calcMode"');
+  assertIncludes(file, 'value="tripwire"');
+}
+
+// PRICE ANCHORS: subscription/retainer alternatives vs the one-time audit
+// (sources are cited as comments next to the `anchors` copy in the
+// generator).
+for (const file of ["dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html"]) {
+  assertIncludes(file, "anchor-strip");
+  assertIncludes(file, "OttoQA");
+  assertIncludes(file, "$900");
+}
+assertIncludes("dist/ru/index.html", "ОКК на аутсорсе");
+assertIncludes("dist/uk/index.html", "ОКК на аутсорсі");
+assertIncludes("dist/en/index.html", "Outsourced QA dept");
+
+// INTEGRATION MATRIX: all seven named systems on every locale, honest
+// wording (recordings via export/API, no fake logos), format tags present.
+for (const file of ["dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html"]) {
+  assertIncludes(file, 'id="integrations"');
+  for (const name of ["Binotel", "Ringostat", "Phonet", "UniTalk", "KeyCRM", "amoCRM", "Bitrix24"]) {
+    assertIncludes(file, name);
+  }
+  assertIncludes(file, "int-tag");
+}
+
+// CROSS-PROMO: every landing locale and every sample report links the
+// author's OTHER three products (CV Reality Check / ShipShape / Artur's
+// site), never CallControl itself as a promo card.
+for (const file of [
+  "dist/index.html", "dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html",
+  "dist/samples/b2b-saas-ru-sample-report.html", "dist/samples/edtech-ua-sample-report.html", "dist/samples/b2b-saas-en-sample-report.html"
+]) {
+  assertIncludes(file, "https://cv-clarity-check.lovable.app");
+  assertIncludes(file, "https://tanstack-start-app.manukianartur1997.workers.dev");
+  assertIncludes(file, "https://ai.manukianartur1997.workers.dev");
+}
+
 console.log("Smoke check passed");

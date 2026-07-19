@@ -92,6 +92,15 @@ function renderSectionHtml(section) {
 
 function renderSampleReportHtml(report, meta) {
   const sections = report.sections.map(renderSectionHtml).join("");
+  // CROSS-PROMO (optional, graceful when absent): links the author's OTHER
+  // products under the report footer. Data + the note about the uncertain
+  // CV Reality Check URL live in generate-public-landing-live.js
+  // (CROSS_PROMO_URLS / sampleLocaleMeta.cross).
+  const cross = meta.cross
+    ? `<div class="cross"><div class="cross-title">${esc(meta.cross.title)}</div><div class="cross-links">${meta.cross.items
+        .map(([name, href, label]) => `<a class="cross-link" href="${esc(href)}" target="_blank" rel="noopener"><strong>${esc(name)}</strong><span>${esc(label)}</span></a>`)
+        .join("")}</div></div>`
+    : "";
   return `<!doctype html>
 <html lang="${esc(meta.lang)}">
 <head>
@@ -132,7 +141,14 @@ function renderSampleReportHtml(report, meta) {
     li { margin: 5px 0; }
     .footer { margin-top: 20px; padding: 16px 18px; border-radius: 10px; background: var(--ink); color: #fff; display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
     .footer p { color: #c8d5e1; margin: 0; }
-    @media print { body { background: #fff; } .actions { display: none; } }
+    .cross { margin-top: 14px; border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; background: #fbfdff; }
+    .cross-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 10px; }
+    .cross-links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .cross-link { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; text-decoration: none; background: #fff; }
+    .cross-link strong { color: var(--ink); font-size: 13px; }
+    .cross-link span { color: var(--muted); font-size: 12px; line-height: 1.4; }
+    @media (max-width: 640px) { .cross-links { grid-template-columns: 1fr; } }
+    @media print { body { background: #fff; } .actions { display: none; } .cross { display: none; } }
   </style>
 </head>
 <body>
@@ -153,6 +169,7 @@ function renderSampleReportHtml(report, meta) {
       <p>${esc(meta.footerNote)}</p>
       <a class="cta" href="${esc(meta.requestHref)}">${esc(meta.requestLabel)}</a>
     </div>
+    ${cross}
   </main>
   ${BEACON_SCRIPT}
 </body>
@@ -236,7 +253,8 @@ async function generateSampleReports(samplesDir, samples, localeMeta) {
       requestHref: meta.requestHref,
       requestLabel: meta.requestLabel,
       footerNote: meta.footerNote,
-      brandLabel: meta.brandLabel
+      brandLabel: meta.brandLabel,
+      cross: meta.cross
     });
     fs.writeFileSync(path.join(samplesDir, `${baseName}.html`), html);
 
