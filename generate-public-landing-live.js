@@ -298,6 +298,86 @@ Object.assign(copy.en, {
   faq: [["What if we do not have call recordings?", "Zoom, Google Meet, telephony recordings, voice messages, or ready transcripts all work."], ["What is the minimum number of calls?", "20 calls is preferable. Fewer calls can work for a quick snapshot."], ["How do you handle confidentiality?", "We can sign an NDA before you share recordings. Managers are labeled as M-1, M-2, and so on."], ["How is this different from Fireflies, Gong, or CRM?", "They provide data and transcripts. CallControl turns calls into a management report."], ["Can you analyze support calls?", "Yes, but the checklist changes: tone, empathy, response speed, and escalation become more important."], ["Will there be a workspace?", "Yes. Right now the audit works as a service: less implementation, faster first result."]],
 });
 
+// EDTECH LANDING VARIANT: same generator, same architecture as the ru/uk/en
+// objects above — spread the base locale's copy, then override only what
+// actually differs for an online-school audience: hero (badge/h1/lead),
+// SEO meta (title/desc), two of the four leak bullets (parent-vs-student
+// decision maker, price/format objections — the other two, next-step and
+// offer-fit, stay generic on purpose), and the two "worked example" lines
+// in the proof card (Value at Risk + Call Evidence phrasing). Every other
+// section — pricing ladder, tripwire, calculator, comparison table,
+// integrations, FAQ, sample report file, footer, cross-promo, lead form —
+// is inherited untouched. Served at /edtech/{locale}/, standalone (the main
+// landing has no audience-fit section yet to link this from). ru+uk are the
+// primary edtech markets on this site; en is a lighter pass with the same
+// shape of overrides and no new sample asset (reuses the base locale's
+// existing sample report, same as ru/uk here).
+copy["ru-edtech"] = {
+  ...copy.ru,
+  url: "/edtech/ru/",
+  title: "CallControl AI — аудит звонков продаж для онлайн-школ",
+  desc: "AI-аудит звонков менеджеров онлайн-школы: возражения по цене и формату обучения, кто реально принимает решение — родитель или ученик, недожатые заявки на курс. PDF-отчёт и план действий.",
+  badge: "AI-аудит звонков · для онлайн-школ и курсов",
+  h1: "Аудит звонков отдела продаж онлайн-школы за 5 рабочих дней",
+  lead: "Найдём, почему заявки на курс не доходят до оплаты: возражения по цене и формату обучения, путаница «кто платит — кто учится», слабый следующий шаг после диагностического звонка. Вернём PDF с цитатами, рейтингом менеджеров и планом действий.",
+  proof: [
+    ["Value at Risk", "28 незакрытых заявок на курс × $300 средний чек (пример расчёта).", "≈$8.4k/мес"],
+    copy.ru.proof[1],
+    copy.ru.proof[2],
+    ["Доказ из звонков", "Возражения по цене и формату курса — с таймкодом, а не пересказом.", "4+ блока"],
+  ],
+  leaks: [
+    ["Кто платит и кто учится", "Менеджер говорит с учеником, а решение и бюджет — за родителем или партнёром, которого нет на звонке.", "высокий риск"],
+    copy.ru.leaks[1],
+    copy.ru.leaks[2],
+    ["Возражение по цене и формату", "Цена или формат (онлайн/офлайн, длительность) звучат раньше, чем клиент понял результат курса — и просит скидку вместо решения.", "утечка денег"],
+  ],
+};
+
+copy["uk-edtech"] = {
+  ...copy.uk,
+  url: "/edtech/uk/",
+  title: "CallControl AI — аудит дзвінків продажів для онлайн-шкіл",
+  desc: "AI-аудит дзвінків менеджерів онлайн-школи: заперечення по ціні й формату навчання, хто насправді приймає рішення — батьки чи учень, недотиснуті заявки на курс. PDF-звіт і план дій.",
+  badge: "AI-аудит дзвінків · для онлайн-шкіл і курсів",
+  h1: "Аудит дзвінків відділу продажів онлайн-школи за 5 робочих днів",
+  lead: "Знайдемо, чому заявки на курс не доходять до оплати: заперечення по ціні й формату навчання, плутанина «хто платить — хто навчається», слабкий наступний крок після діагностичного дзвінка. Повернемо PDF з цитатами, рейтингом менеджерів і планом дій.",
+  proof: [
+    ["Value at Risk", "28 незакритих заявок на курс × $300 середній чек (приклад розрахунку).", "≈$8.4k/міс"],
+    copy.uk.proof[1],
+    copy.uk.proof[2],
+    ["Доказ із дзвінків", "Заперечення по ціні й формату курсу — з таймкодом, а не переказом.", "4+ блоки"],
+  ],
+  leaks: [
+    ["Хто платить і хто навчається", "Менеджер говорить з учнем, а рішення й бюджет — за батьками чи партнером, якого немає на дзвінку.", "високий ризик"],
+    copy.uk.leaks[1],
+    copy.uk.leaks[2],
+    ["Заперечення по ціні й формату", "Ціна чи формат (онлайн/офлайн, тривалість) звучать раніше, ніж клієнт зрозумів результат курсу — і просить знижку замість рішення.", "витік грошей"],
+  ],
+};
+
+copy["en-edtech"] = {
+  ...copy.en,
+  url: "/edtech/en/",
+  title: "CallControl AI — sales call audit for online schools",
+  desc: "AI call audit for online school sales teams: price/format objections, parent-vs-student decision dynamics, and enrollment calls that stall before payment. PDF report and action plan.",
+  badge: "AI call audit · for online schools & course platforms",
+  h1: "Sales call audit for online schools in 5 business days",
+  lead: "Find why enrollment calls stall before payment: price and format objections, confusion over who pays vs. who studies, and a weak next step after the intro call. Get a PDF with call quotes, manager ranking, and an action plan.",
+  proof: [
+    ["Value at Risk", "28 unclosed course applications × $300 avg check (worked example).", "≈$8.4k/mo"],
+    copy.en.proof[1],
+    copy.en.proof[2],
+    ["Call Evidence", "Price and format objections, timestamped instead of paraphrased.", "4+ blocks"],
+  ],
+  leaks: [
+    ["Who pays vs. who studies", "The manager talks to the student, but the decision and the budget sit with a parent or partner who is not on the call.", "high risk"],
+    copy.en.leaks[1],
+    copy.en.leaks[2],
+    ["Price and format objections", "Price or format (online/offline, course length) comes up before the client understands the outcome, so they ask for a discount instead of a decision.", "money leak"],
+  ],
+};
+
 const esc = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const url = (l) => (l === "ru" ? "/ru/" : copy[l].url);
 const list = (items) => items.map((i) => `<li>${esc(i)}</li>`).join("");
@@ -322,14 +402,29 @@ function calcAddons(t) {
   return t.calcAddons.map(([key, label, badge]) => `<label class="calc-addon"><input type="checkbox" data-calc-addon="${esc(key)}"><span>${esc(label)}</span><b>${esc(badge)}</b></label>`).join("");
 }
 
-function render(locale) {
+function render(locale, opts = {}) {
   const t = copy[locale];
+  // opts let a variant (e.g. the edtech landing below) reuse this whole
+  // renderer: `group` scopes the lang-switch/hreflang cluster to that
+  // variant's own locales instead of the main ru/uk/en set, `xDefaultHref`
+  // points hreflang="x-default" at that variant's own default entry point,
+  // and `includeDetectScript` turns off the main-site pre-paint
+  // auto-redirect (it targets /ru|uk|en/ paths only, so it is inert on a
+  // variant route anyway, but omitting it keeps the output honest about
+  // what actually runs there).
+  const group = opts.group || ["ru", "uk", "en"];
+  const xDefaultHref = opts.xDefaultHref || (SITE_ORIGIN + "/");
+  const includeDetectScript = opts.includeDetectScript !== false;
   const navLabels = { ru: "Основная навигация", uk: "Основна навігація", en: "Main navigation" };
   const langSwitchLabels = { ru: "Выбор языка", uk: "Вибір мови", en: "Language" };
   const langNames = { ru: "Русский", uk: "Українська", en: "English" };
-  const navLabel = navLabels[locale] || navLabels.en;
-  const langSwitchLabel = langSwitchLabels[locale] || langSwitchLabels.en;
-  const langs = ["ru", "uk", "en"].map((l) => `<a class="lang-pill${l === locale ? " active" : ""}" href="${url(l)}" hreflang="${l}" lang="${l}" aria-label="${esc(langNames[l])}"${l === locale ? ' aria-current="page"' : ""}>${l === "uk" ? "UA" : l.toUpperCase()}</a>`).join("");
+  const navLabel = navLabels[t.lang] || navLabels.en;
+  const langSwitchLabel = langSwitchLabels[t.lang] || langSwitchLabels.en;
+  const langs = group.map((k) => {
+    const real = copy[k].lang;
+    const active = k === locale;
+    return `<a class="lang-pill${active ? " active" : ""}" href="${url(k)}" hreflang="${real}" lang="${real}" aria-label="${esc(langNames[real])}"${active ? ' aria-current="page"' : ""}>${real === "uk" ? "UA" : real.toUpperCase()}</a>`;
+  }).join("");
   const trust = t.trust.map(([a, b]) => `<div class="trust-item"><strong>${esc(a)}</strong><span>${esc(b)}</span></div>`).join("");
   const proof = t.proof.map(([a, b, c], i) => `<div class="proof-row"><div><strong>${esc(a)}</strong><span>${esc(b)}</span></div><b class="${i === 0 || i === 3 ? "risk" : ""}">${esc(c)}</b></div>`).join("");
   const steps = t.steps.map(([a, b, c]) => `<article class="step-card"><small>${esc(a)}</small><strong>${esc(b)}</strong><p>${esc(c)}</p></article>`).join("");
@@ -397,11 +492,11 @@ function render(locale) {
   // x-default is the root, whose pre-paint script picks the visitor's
   // language.
   const hreflangs =
-    ["ru", "uk", "en"].map((l) => `<link rel="alternate" hreflang="${l}" href="${SITE_ORIGIN}${url(l)}"/>`).join("") +
-    `<link rel="alternate" hreflang="x-default" href="${SITE_ORIGIN}/"/>`;
+    group.map((k) => `<link rel="alternate" hreflang="${copy[k].lang}" href="${SITE_ORIGIN}${url(k)}"/>`).join("") +
+    `<link rel="alternate" hreflang="x-default" href="${xDefaultHref}"/>`;
   // OG/Twitter tags use the locale's real positioning copy (t.title/t.desc);
   // the share image is one static 1200x630 card for all locales.
-  const seoHead = `<link rel="canonical" href="${canonical}"/>${hreflangs}<meta property="og:site_name" content="CallControl AI"/><meta property="og:title" content="${esc(t.title)}"/><meta property="og:description" content="${esc(t.desc)}"/><meta property="og:type" content="website"/><meta property="og:url" content="${canonical}"/><meta property="og:locale" content="${ogLocaleOf(locale)}"/>${["ru", "uk", "en"].filter((l) => l !== locale).map((l) => `<meta property="og:locale:alternate" content="${ogLocaleOf(l)}"/>`).join("")}<meta property="og:image" content="${ogImage}"/><meta property="og:image:width" content="1200"/><meta property="og:image:height" content="630"/><meta property="og:image:alt" content="CallControl AI — ${esc(t.h1)}"/><meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="${esc(t.title)}"/><meta name="twitter:description" content="${esc(t.desc)}"/><meta name="twitter:image" content="${ogImage}"/>`;
+  const seoHead = `<link rel="canonical" href="${canonical}"/>${hreflangs}<meta property="og:site_name" content="CallControl AI"/><meta property="og:title" content="${esc(t.title)}"/><meta property="og:description" content="${esc(t.desc)}"/><meta property="og:type" content="website"/><meta property="og:url" content="${canonical}"/><meta property="og:locale" content="${ogLocaleOf(t.lang)}"/>${group.filter((k) => k !== locale).map((k) => `<meta property="og:locale:alternate" content="${ogLocaleOf(copy[k].lang)}"/>`).join("")}<meta property="og:image" content="${ogImage}"/><meta property="og:image:width" content="1200"/><meta property="og:image:height" content="630"/><meta property="og:image:alt" content="CallControl AI — ${esc(t.h1)}"/><meta name="twitter:card" content="summary_large_image"/><meta name="twitter:title" content="${esc(t.title)}"/><meta name="twitter:description" content="${esc(t.desc)}"/><meta name="twitter:image" content="${ogImage}"/>`;
   // First-visit language auto-detect. Sits first in <head> so a redirect
   // happens before anything paints. Rules: a saved manual choice (cc:locale,
   // the same key the platform demo persists through STATE.setLocale) always
@@ -413,12 +508,12 @@ function render(locale) {
   // detected language differs from the page's own - the target variant then
   // sees pick===here, which makes a loop impossible. location.replace keeps
   // the auto-hop out of history so Back does not bounce.
-  const detectScript = `<script>(function(){try{var here=${JSON.stringify(locale)};var p=location.pathname;if(p!=="/"&&p!=="/index.html"&&!/^\\/(?:ru|uk|en)\\/(?:index\\.html)?$/.test(p))return;if(localStorage.getItem("cc:locale"))return;var langs=navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language||""];var pick="en";for(var i=0;i<langs.length;i++){var c=String(langs[i]||"").slice(0,2).toLowerCase();if(c==="ru"||c==="uk"||c==="en"){pick=c;break}}if(pick!==here)location.replace("/"+pick+"/"+location.search+location.hash)}catch(e){}})();</script>`;
+  const detectScript = includeDetectScript ? `<script>(function(){try{var here=${JSON.stringify(locale)};var p=location.pathname;if(p!=="/"&&p!=="/index.html"&&!/^\\/(?:ru|uk|en)\\/(?:index\\.html)?$/.test(p))return;if(localStorage.getItem("cc:locale"))return;var langs=navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language||""];var pick="en";for(var i=0;i<langs.length;i++){var c=String(langs[i]||"").slice(0,2).toLowerCase();if(c==="ru"||c==="uk"||c==="en"){pick=c;break}}if(pick!==here)location.replace("/"+pick+"/"+location.search+location.hash)}catch(e){}})();</script>` : "";
   // Manual switch via the lang pills persists the choice so auto-detect
   // never fights the user again (and the platform demo opens in the same
   // language). Plain anchors keep working without JS.
   const langSaveScript = `<script>(function(){var pills=document.querySelectorAll(".lang-pill");for(var i=0;i<pills.length;i++){pills[i].addEventListener("click",function(){try{localStorage.setItem("cc:locale",this.getAttribute("hreflang"))}catch(e){}})}})();</script>`;
-  return `<!doctype html><html lang="${t.lang}"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>${detectScript}<title>${esc(t.title)}</title><meta name="description" content="${esc(t.desc)}"/><meta name="theme-color" content="#020617"/><link rel="icon" href="${FAVICON}"/><link rel="apple-touch-icon" href="${FAVICON}"/>${seoHead}<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><style>${css()}</style></head><body><header class="topbar"><div class="wrap nav"><a class="brand" href="${url(locale)}"><strong>CallControl AI</strong><span>${esc(t.badge)}</span></a><nav class="nav-links" aria-label="${esc(navLabel)}"><a href="#process">${esc(t.nav[0])}</a><a href="#sample">${esc(t.nav[1])}</a><a href="#compare">${esc(t.compareNav)}</a><a href="#pricing">${esc(t.nav[2])}</a><a href="/platform/">${esc(t.platformLabel)}</a><a class="nav-cta" href="#request">${esc(t.nav[4])}</a></nav><div class="lang-switch" role="navigation" aria-label="${esc(langSwitchLabel)}">${langs}</div></div></header><main><section class="hero"><div class="wrap hero-grid"><div><span class="badge">${esc(t.badge)}</span><h1>${esc(t.h1)}</h1><p class="hero-lead">${esc(t.lead)}</p><div class="actions"><a class="button primary" href="#request">${esc(t.cta)}</a><a class="button secondary" href="/platform/">${esc(t.platformDemo)}</a></div><div class="trust-grid">${trust}</div></div><aside class="proof-card"><h2>${esc(t.proofTitle)}</h2>${proof}</aside></div></section><section id="sample"><div class="wrap sample-layout"><article class="sample-preview"><small>${esc(t.sampleEyebrow)}</small><h3>${esc(t.sampleTitle)}</h3><p>${esc(t.sampleLead)}</p><div class="sample-list">${sampleMetrics}</div><div class="actions"><a class="button primary" href="${t.sampleFile}">${esc(t.sample)}</a><a class="button secondary" href="${t.samplePdf}" download>${esc(t.samplePdfLabel)}</a></div></article><div class="sample-side"><div class="section-head"><h2>${esc(t.sampleTitle)}</h2><p>${esc(t.sampleLead)}</p><div class="sample-note">${esc(t.sampleNote)}</div></div><div class="grid-4">${mini(t.cards)}</div></div></div>${moneyBlock}</section><section id="process"><div class="wrap"><div class="section-head"><h2>${esc(t.processTitle)}</h2><p>${esc(t.processLead)}</p></div><div class="grid-4">${steps}</div></div></section>${integrationsSection}<section><div class="wrap two-col"><div class="section-head"><h2>${esc(t.leakTitle)}</h2><p>${esc(t.leakLead)}</p></div><div class="leak-stack">${leaks}</div></div></section><section id="compare"><div class="wrap"><div class="section-head"><h2>${esc(t.compareTitle)}</h2><p>${esc(t.compareLead)}</p></div>${compareTable}<p class="cmp-note">${esc(t.compareNote)}</p></div></section><section id="pricing"><div class="wrap"><div class="section-head"><h2>${esc(t.pricingTitle)}</h2><p>${esc(t.pricingLead)}</p></div>${anchorStrip}${ladderHtml}<div class="form-card calc-card"><div class="section-head"><h2>${esc(t.calcTitle)}</h2><p>${esc(t.calcLead)}</p></div><div class="calc-grid"><div class="calc-main">${calcModeHtml}<div class="calc-row" id="calcRow"><label for="calcCalls">${esc(t.calcCallsLabel)}</label><b id="calcCallsValue" class="price">20</b></div><input type="range" id="calcCalls" min="10" max="120" step="5" value="20"><div class="calc-addons" id="calcAddons">${calcAddonsHtml}</div></div><div class="calc-total"><span>${esc(t.calcTotalLabel)}</span><strong id="calcTotal" class="price">$700</strong><p class="calc-note" id="calcNote">${esc(t.calcNote)}</p><a class="button primary" href="#request" id="calcCta">${esc(t.calcCta)}</a></div></div><p class="calc-note calc-retainer-note">${esc(t.calcRetainerNote)}</p></div></div></section><section><div class="wrap"><div class="section-head"><h2>${esc(t.futureTitle)}</h2><p>${esc(t.futureLead)}</p></div><div class="future-grid">${mini(t.future)}</div><p class="future-note">${esc(t.futureNote)}</p></div></section><section id="faq"><div class="wrap"><div class="section-head"><h2>${esc(t.faqTitle)}</h2></div><div class="faq-grid">${faq}</div></div></section><section id="request"><div class="wrap"><div class="form-card"><div class="section-head"><h2>${esc(t.formTitle)}</h2><p>${esc(t.formLead)}</p></div><form id="leadForm"><div class="form-grid">${fields(t)}</div><div class="actions"><button class="button primary" type="submit">${esc(t.send)}</button></div><div class="form-status" id="formStatus"></div><p class="privacy">${esc(t.privacy)}</p></form></div></div></section></main><footer class="footer"><div class="wrap">${crossPromo}<div class="footer-inner"><span>${esc(t.footer)}</span><span>Telegram: @manukianartur1997 · <a href="/platform/">${esc(t.platformLabel)}</a></span></div></div></footer><script>(function(){const ok=${JSON.stringify(t.ok)},fail=${JSON.stringify(t.fail)},sending=${JSON.stringify(t.sending)},send=${JSON.stringify(t.send)};const started=Date.now();const f=document.querySelector("#leadForm"),s=document.querySelector("#formStatus");f.addEventListener("submit",async(e)=>{e.preventDefault();const b=f.querySelector("button");b.disabled=true;b.textContent=sending;s.innerHTML="";const p=Object.fromEntries(new FormData(f).entries());p.source="callcontrol-public-landing";p.locale=${JSON.stringify(locale)};p.formElapsedMs=Date.now()-started;try{const r=await fetch("/api/leads",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});if(!r.ok)throw new Error("request_failed");s.innerHTML="<strong>"+ok[0]+"</strong><br>"+ok[1];f.reset()}catch(_){s.innerHTML="<strong>"+fail[0]+"</strong><br>"+fail[1]}finally{b.disabled=false;b.textContent=send}})})();</script><script>(function(){const calls=document.querySelector("#calcCalls");if(!calls)return;const callsValue=document.querySelector("#calcCallsValue"),total=document.querySelector("#calcTotal"),addons=document.querySelectorAll("[data-calc-addon]"),modes=document.querySelectorAll('input[name="calcMode"]'),row=document.querySelector("#calcRow"),addonsBox=document.querySelector("#calcAddons"),note=document.querySelector("#calcNote");const tripwirePrice=${JSON.stringify(t.tripwire.price)},tripwireNote=${JSON.stringify(t.calcTripwireNote)},fullNote=${JSON.stringify(t.calcNote)};function baseForCalls(n){if(n<=20)return 700;if(n<=40)return 700+(n-20)*40;if(n<=80)return 1500+(n-40)*37.5;return 3000+(n-80)*30}function mode(){let m="full";modes.forEach((r)=>{if(r.checked)m=r.value});return m}function recompute(){const tripwire=mode()==="tripwire";if(row)row.style.display=tripwire?"none":"";calls.style.display=tripwire?"none":"";if(addonsBox)addonsBox.style.display=tripwire?"none":"";if(note)note.textContent=tripwire?tripwireNote:fullNote;if(tripwire){total.textContent=tripwirePrice;return}const n=Number(calls.value);callsValue.textContent=n;let sum=baseForCalls(n);const picked={};addons.forEach((box)=>{picked[box.dataset.calcAddon]=box.checked});if(picked.rush)sum*=1.2;if(picked.coaching)sum+=150;if(picked.followup)sum+=150;if(picked.locale)sum+=100;total.textContent="$"+Math.round(sum).toLocaleString("en-US")}calls.addEventListener("input",recompute);addons.forEach((box)=>box.addEventListener("change",recompute));modes.forEach((r)=>r.addEventListener("change",recompute));recompute()})()</script>${moneyScript}${langSaveScript}${BEACON_SCRIPT}</body></html>`;
+  return `<!doctype html><html lang="${t.lang}"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>${detectScript}<title>${esc(t.title)}</title><meta name="description" content="${esc(t.desc)}"/><meta name="theme-color" content="#020617"/><link rel="icon" href="${FAVICON}"/><link rel="apple-touch-icon" href="${FAVICON}"/>${seoHead}<link rel="preconnect" href="https://fonts.googleapis.com"/><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/><style>${css()}</style></head><body><header class="topbar"><div class="wrap nav"><a class="brand" href="${url(locale)}"><strong>CallControl AI</strong><span>${esc(t.badge)}</span></a><nav class="nav-links" aria-label="${esc(navLabel)}"><a href="#process">${esc(t.nav[0])}</a><a href="#sample">${esc(t.nav[1])}</a><a href="#compare">${esc(t.compareNav)}</a><a href="#pricing">${esc(t.nav[2])}</a><a href="/platform/">${esc(t.platformLabel)}</a><a class="nav-cta" href="#request">${esc(t.nav[4])}</a></nav><div class="lang-switch" role="navigation" aria-label="${esc(langSwitchLabel)}">${langs}</div></div></header><main><section class="hero"><div class="wrap hero-grid"><div><span class="badge">${esc(t.badge)}</span><h1>${esc(t.h1)}</h1><p class="hero-lead">${esc(t.lead)}</p><div class="actions"><a class="button primary" href="#request">${esc(t.cta)}</a><a class="button secondary" href="/platform/">${esc(t.platformDemo)}</a></div><div class="trust-grid">${trust}</div></div><aside class="proof-card"><h2>${esc(t.proofTitle)}</h2>${proof}</aside></div></section><section id="sample"><div class="wrap sample-layout"><article class="sample-preview"><small>${esc(t.sampleEyebrow)}</small><h3>${esc(t.sampleTitle)}</h3><p>${esc(t.sampleLead)}</p><div class="sample-list">${sampleMetrics}</div><div class="actions"><a class="button primary" href="${t.sampleFile}">${esc(t.sample)}</a><a class="button secondary" href="${t.samplePdf}" download>${esc(t.samplePdfLabel)}</a></div></article><div class="sample-side"><div class="section-head"><h2>${esc(t.sampleTitle)}</h2><p>${esc(t.sampleLead)}</p><div class="sample-note">${esc(t.sampleNote)}</div></div><div class="grid-4">${mini(t.cards)}</div></div></div>${moneyBlock}</section><section id="process"><div class="wrap"><div class="section-head"><h2>${esc(t.processTitle)}</h2><p>${esc(t.processLead)}</p></div><div class="grid-4">${steps}</div></div></section>${integrationsSection}<section><div class="wrap two-col"><div class="section-head"><h2>${esc(t.leakTitle)}</h2><p>${esc(t.leakLead)}</p></div><div class="leak-stack">${leaks}</div></div></section><section id="compare"><div class="wrap"><div class="section-head"><h2>${esc(t.compareTitle)}</h2><p>${esc(t.compareLead)}</p></div>${compareTable}<p class="cmp-note">${esc(t.compareNote)}</p></div></section><section id="pricing"><div class="wrap"><div class="section-head"><h2>${esc(t.pricingTitle)}</h2><p>${esc(t.pricingLead)}</p></div>${anchorStrip}${ladderHtml}<div class="form-card calc-card"><div class="section-head"><h2>${esc(t.calcTitle)}</h2><p>${esc(t.calcLead)}</p></div><div class="calc-grid"><div class="calc-main">${calcModeHtml}<div class="calc-row" id="calcRow"><label for="calcCalls">${esc(t.calcCallsLabel)}</label><b id="calcCallsValue" class="price">20</b></div><input type="range" id="calcCalls" min="10" max="120" step="5" value="20"><div class="calc-addons" id="calcAddons">${calcAddonsHtml}</div></div><div class="calc-total"><span>${esc(t.calcTotalLabel)}</span><strong id="calcTotal" class="price">$700</strong><p class="calc-note" id="calcNote">${esc(t.calcNote)}</p><a class="button primary" href="#request" id="calcCta">${esc(t.calcCta)}</a></div></div><p class="calc-note calc-retainer-note">${esc(t.calcRetainerNote)}</p></div></div></section><section><div class="wrap"><div class="section-head"><h2>${esc(t.futureTitle)}</h2><p>${esc(t.futureLead)}</p></div><div class="future-grid">${mini(t.future)}</div><p class="future-note">${esc(t.futureNote)}</p></div></section><section id="faq"><div class="wrap"><div class="section-head"><h2>${esc(t.faqTitle)}</h2></div><div class="faq-grid">${faq}</div></div></section><section id="request"><div class="wrap"><div class="form-card"><div class="section-head"><h2>${esc(t.formTitle)}</h2><p>${esc(t.formLead)}</p></div><form id="leadForm"><div class="form-grid">${fields(t)}</div><div class="actions"><button class="button primary" type="submit">${esc(t.send)}</button></div><div class="form-status" id="formStatus"></div><p class="privacy">${esc(t.privacy)}</p></form></div></div></section></main><footer class="footer"><div class="wrap">${crossPromo}<div class="footer-inner"><span>${esc(t.footer)}</span><span>Telegram: @manukianartur1997 · <a href="/platform/">${esc(t.platformLabel)}</a></span></div></div></footer><script>(function(){const ok=${JSON.stringify(t.ok)},fail=${JSON.stringify(t.fail)},sending=${JSON.stringify(t.sending)},send=${JSON.stringify(t.send)};const started=Date.now();const f=document.querySelector("#leadForm"),s=document.querySelector("#formStatus");f.addEventListener("submit",async(e)=>{e.preventDefault();const b=f.querySelector("button");b.disabled=true;b.textContent=sending;s.innerHTML="";const p=Object.fromEntries(new FormData(f).entries());p.source="callcontrol-public-landing";p.locale=${JSON.stringify(t.lang)};p.formElapsedMs=Date.now()-started;try{const r=await fetch("/api/leads",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});if(!r.ok)throw new Error("request_failed");s.innerHTML="<strong>"+ok[0]+"</strong><br>"+ok[1];f.reset()}catch(_){s.innerHTML="<strong>"+fail[0]+"</strong><br>"+fail[1]}finally{b.disabled=false;b.textContent=send}})})();</script><script>(function(){const calls=document.querySelector("#calcCalls");if(!calls)return;const callsValue=document.querySelector("#calcCallsValue"),total=document.querySelector("#calcTotal"),addons=document.querySelectorAll("[data-calc-addon]"),modes=document.querySelectorAll('input[name="calcMode"]'),row=document.querySelector("#calcRow"),addonsBox=document.querySelector("#calcAddons"),note=document.querySelector("#calcNote");const tripwirePrice=${JSON.stringify(t.tripwire.price)},tripwireNote=${JSON.stringify(t.calcTripwireNote)},fullNote=${JSON.stringify(t.calcNote)};function baseForCalls(n){if(n<=20)return 700;if(n<=40)return 700+(n-20)*40;if(n<=80)return 1500+(n-40)*37.5;return 3000+(n-80)*30}function mode(){let m="full";modes.forEach((r)=>{if(r.checked)m=r.value});return m}function recompute(){const tripwire=mode()==="tripwire";if(row)row.style.display=tripwire?"none":"";calls.style.display=tripwire?"none":"";if(addonsBox)addonsBox.style.display=tripwire?"none":"";if(note)note.textContent=tripwire?tripwireNote:fullNote;if(tripwire){total.textContent=tripwirePrice;return}const n=Number(calls.value);callsValue.textContent=n;let sum=baseForCalls(n);const picked={};addons.forEach((box)=>{picked[box.dataset.calcAddon]=box.checked});if(picked.rush)sum*=1.2;if(picked.coaching)sum+=150;if(picked.followup)sum+=150;if(picked.locale)sum+=100;total.textContent="$"+Math.round(sum).toLocaleString("en-US")}calls.addEventListener("input",recompute);addons.forEach((box)=>box.addEventListener("change",recompute));modes.forEach((r)=>r.addEventListener("change",recompute));recompute()})()</script>${moneyScript}${langSaveScript}${BEACON_SCRIPT}</body></html>`;
 }
 
 function css() {
@@ -440,6 +535,21 @@ module.exports = async function generatePublicLandingLive() {
   }
   fs.writeFileSync(path.join(outDir, "hybrid-demo.html"), render("ru"));
 
+  // EDTECH LANDING VARIANT: dedicated route under /edtech/{locale}/, built
+  // with the same render() plus the copy["*-edtech"] overrides defined
+  // above. Its own lang-switch/hreflang cluster (`group`) links only the
+  // other edtech pages - not the generic /ru|uk|en/ landing - and the
+  // pre-paint auto-detect redirect is left off (see `includeDetectScript`
+  // in render()) since there is no /edtech/ root for it to redirect from.
+  const EDTECH_GROUP = ["ru-edtech", "uk-edtech", "en-edtech"];
+  const EDTECH_DIR = { "ru-edtech": "ru", "uk-edtech": "uk", "en-edtech": "en" };
+  for (const key of EDTECH_GROUP) {
+    const html = render(key, { group: EDTECH_GROUP, xDefaultHref: `${SITE_ORIGIN}/edtech/ru/`, includeDetectScript: false });
+    const dir = path.join(outDir, "edtech", EDTECH_DIR[key]);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "index.html"), html);
+  }
+
   // robots.txt + sitemap.xml. Internal/duplicate pages (operator screen,
   // legacy demo, the ru duplicate hybrid-demo, the print template) are kept
   // out of the index; the sitemap lists only the canonical public pages.
@@ -449,6 +559,9 @@ module.exports = async function generatePublicLandingLive() {
     "/uk/",
     "/en/",
     "/platform/",
+    "/edtech/ru/",
+    "/edtech/uk/",
+    "/edtech/en/",
     ...Object.keys(samples).map((file) => `/samples/${file.replace(/\.md$/, ".html")}`)
   ];
   const sitemap =
@@ -470,5 +583,5 @@ module.exports = async function generatePublicLandingLive() {
   ].join("\n");
   fs.writeFileSync(path.join(outDir, "robots.txt"), robots);
 
-  console.log("Public service landing ready: dist/index.html, dist/ru/index.html, dist/uk/index.html, dist/en/index.html");
+  console.log("Public service landing ready: dist/index.html, dist/ru/index.html, dist/uk/index.html, dist/en/index.html, dist/edtech/{ru,uk,en}/index.html");
 };

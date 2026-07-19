@@ -307,4 +307,66 @@ for (const file of ["dist/ru/index.html", "dist/uk/index.html", "dist/en/index.h
   assertExcludes(file, "[$500");
 }
 
+// EDTECH LANDING VARIANT: dedicated route at /edtech/{locale}/, built from
+// the same render() as the main landing. Must exist for ru/uk (primary
+// edtech markets) and en (lighter pass), carry the edtech-specific hero and
+// the two edtech-flavored pain bullets, and still ship every reused
+// component (pricing ladder, tripwire, calculator, comparison table,
+// integrations, cross-promo) untouched.
+for (const file of ["dist/edtech/ru/index.html", "dist/edtech/uk/index.html", "dist/edtech/en/index.html"]) {
+  assertIncludes(file, "<style>");
+  assertIncludes(file, 'class="ladder"');
+  assertIncludes(file, '<div class="ladder-num">1</div>');
+  assertIncludes(file, '<div class="ladder-num">4</div>');
+  assertIncludes(file, "tripwire-card");
+  assertIncludes(file, 'id="compare"');
+  assertIncludes(file, "Gong");
+  assertIncludes(file, 'id="integrations"');
+  assertIncludes(file, "KeyCRM");
+  assertIncludes(file, "amoCRM");
+  assertIncludes(file, 'id="calcCalls"');
+  assertIncludes(file, "data-calc-addon");
+  assertIncludes(file, 'name="company_website"'); // honeypot, reused lead form
+  assertIncludes(file, "https://cv-clarity-check.lovable.app");
+  assertIncludes(file, "https://tanstack-start-app.manukianartur1997.workers.dev");
+  assertIncludes(file, "https://ai.manukianartur1997.workers.dev");
+}
+assertIncludes("dist/edtech/ru/index.html", "Аудит звонков отдела продаж онлайн-школы за 5 рабочих дней");
+assertIncludes("dist/edtech/uk/index.html", "Аудит дзвінків відділу продажів онлайн-школи за 5 робочих днів");
+assertIncludes("dist/edtech/en/index.html", "Sales call audit for online schools in 5 business days");
+assertIncludes("dist/edtech/ru/index.html", "Кто платит и кто учится");
+assertIncludes("dist/edtech/ru/index.html", "Возражение по цене и формату");
+assertIncludes("dist/edtech/uk/index.html", "Хто платить і хто навчається");
+assertIncludes("dist/edtech/uk/index.html", "Заперечення по ціні й формату");
+assertIncludes("dist/edtech/en/index.html", "Who pays vs. who studies");
+assertIncludes("dist/edtech/en/index.html", "Price and format objections");
+// The other two leak bullets (next step / offer fit) stay generic/inherited
+// from the base locale copy, per the "reuse ALL existing components" rule.
+assertIncludes("dist/edtech/ru/index.html", "Следующий шаг");
+assertIncludes("dist/edtech/uk/index.html", "Наступний крок");
+assertIncludes("dist/edtech/en/index.html", "Next step");
+
+// Edtech pages must NOT ship the main-site pre-paint auto-detect redirect
+// (it only targets /ru|uk|en/ paths and would be dead code here) and must
+// scope their lang-switch + hreflang cluster to the edtech routes only —
+// never linking back into the generic /ru/, /uk/, /en/ landing.
+for (const file of ["dist/edtech/ru/index.html", "dist/edtech/uk/index.html", "dist/edtech/en/index.html"]) {
+  assertExcludes(file, 'localStorage.getItem("cc:locale")');
+  assertExcludes(file, 'href="/ru/"');
+  assertExcludes(file, 'href="/uk/"');
+  assertExcludes(file, 'href="/en/"');
+  assertIncludes(file, 'href="/edtech/ru/"');
+  assertIncludes(file, 'href="/edtech/uk/"');
+  assertIncludes(file, 'href="/edtech/en/"');
+}
+for (const locale of ["ru", "uk", "en"]) {
+  assertIncludes(`dist/edtech/${locale}/index.html`, `<link rel="canonical" href="${SITE_ORIGIN}/edtech/${locale}/"/>`);
+  assertIncludes(`dist/edtech/${locale}/index.html`, `<meta property="og:url" content="${SITE_ORIGIN}/edtech/${locale}/"/>`);
+}
+
+// sitemap.xml must list the edtech routes as canonical public pages.
+for (const p of ["/edtech/ru/", "/edtech/uk/", "/edtech/en/"]) {
+  assertIncludes("dist/sitemap.xml", `<loc>${SITE_ORIGIN}${p}</loc>`);
+}
+
 console.log("Smoke check passed");
