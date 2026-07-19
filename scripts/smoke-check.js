@@ -253,4 +253,58 @@ for (const file of [
   assertIncludes(file, "https://ai.manukianartur1997.workers.dev");
 }
 
+// PRICING LADDER: one visible 4-step progression — Express Snapshot (step 1,
+// already covered by the tripwire assertions above) -> full audit tiers
+// (step 2) -> CRM implementation from $1,000 (step 3, new) -> monthly
+// quality-control retainer from $500/mo (step 4, new). All four rungs must
+// render inside a single `.ladder` wrapper with numbered steps, and both
+// new rungs must use vilka-style "from $X" pricing (never a rigid number).
+for (const file of ["dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html"]) {
+  assertIncludes(file, 'class="ladder"');
+  assertIncludes(file, 'class="ladder-step"');
+  assertIncludes(file, '<div class="ladder-num">1</div>');
+  assertIncludes(file, '<div class="ladder-num">2</div>');
+  assertIncludes(file, '<div class="ladder-num">3</div>');
+  assertIncludes(file, '<div class="ladder-num">4</div>');
+  assertIncludes(file, "ladder-unlock");
+  assertIncludes(file, "ladder-card");
+}
+assertIncludes("dist/ru/index.html", "Внедрение в CRM");
+assertIncludes("dist/ru/index.html", "от $1,000");
+assertIncludes("dist/ru/index.html", "Ежемесячный контроль качества");
+assertIncludes("dist/ru/index.html", "от $500/мес");
+assertIncludes("dist/uk/index.html", "Впровадження в CRM");
+assertIncludes("dist/uk/index.html", "від $1,000");
+assertIncludes("dist/uk/index.html", "Щомісячний контроль якості");
+assertIncludes("dist/uk/index.html", "від $500/міс");
+assertIncludes("dist/en/index.html", "CRM implementation");
+assertIncludes("dist/en/index.html", "from $1,000");
+assertIncludes("dist/en/index.html", "Monthly quality control");
+assertIncludes("dist/en/index.html", "from $500/mo");
+
+// KeyCRM/amoCRM must be named as the CRM-implementation targets, and the
+// step-3 scope must stay fixed-scope (not open-ended hours).
+for (const file of ["dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html"]) {
+  assertIncludes(file, "KeyCRM");
+  assertIncludes(file, "amoCRM");
+}
+
+// Calculator stays consistent with the new ladder: the retainer is a note,
+// not a computed line item (no new #calc* input wired to it).
+for (const file of ["dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html"]) {
+  assertIncludes(file, "calc-retainer-note");
+}
+assertIncludes("dist/ru/index.html", "перейти на ежемесячный контроль качества от $500/мес");
+assertIncludes("dist/uk/index.html", "перейти на щомісячний контроль якості від $500/міс");
+assertIncludes("dist/en/index.html", "move to monthly quality control from $500/mo");
+
+// No product in this ladder round ships an unconfirmed numeric placeholder
+// for the two new rungs (the pre-existing tripwire bracket is intentional
+// and already covered above) — $1,000/$500 come straight from the shared
+// ladder rules, so they must render as plain vilka pricing.
+for (const file of ["dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html"]) {
+  assertExcludes(file, "[$1,000]");
+  assertExcludes(file, "[$500");
+}
+
 console.log("Smoke check passed");
