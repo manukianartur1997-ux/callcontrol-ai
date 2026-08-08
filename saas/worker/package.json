@@ -1,0 +1,4 @@
+{
+  "//": "Scopes ES module semantics to saas/worker/ only. The repo root stays CommonJS (server.js, build-pages.js, the generators), while the Worker code here uses import/export like cloudflare-worker.example.js does. Without this, `node --test` treats these files as CJS and the imports fail.",
+  "type": "module"
+}
