@@ -7,7 +7,7 @@
     "build": "node build-pages.js",
     "start": "node server.js",
     "smoke": "node scripts/smoke-check.js",
-    "check": "node --check server.js && node --input-type=module --check < functions/api/leads.js && node --check cloudflare/src/worker.js && node --check saas/worker/ai.js && node --check saas/worker/crypto.js",
+    "check": "node --check server.js && node --input-type=module --check < functions/api/leads.js && node --check cloudflare/src/worker.js && node --check saas/worker/ai.js && node --check saas/worker/crypto.js && node --check saas/worker/telephony.js",
     "test:saas": "node --test saas/worker/*.test.js"
   },
   "engines": {
