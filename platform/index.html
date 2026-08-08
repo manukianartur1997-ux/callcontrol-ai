@@ -51,6 +51,6 @@
   <script src="./js/router.js?v=0.1.0"></script>
   <script src="./js/app.js?v=0.1.0"></script>
   <!-- First-party page-view beacon (Workers Analytics Engine, no cookies/IPs); same snippet as lib/site-meta.js BEACON_SCRIPT. -->
-  <script>(function(){try{var w=window.innerWidth||0,b=w<640?"s":w<1024?"m":"l";var r="";try{r=document.referrer?new URL(document.referrer).origin:""}catch(e){}if(r===location.origin)r="";var d=JSON.stringify({path:location.pathname,ref:r,lang:document.documentElement.lang||"",vw:b});if(navigator.sendBeacon)navigator.sendBeacon("/api/beacon",d);else fetch("/api/beacon",{method:"POST",body:d,keepalive:true}).catch(function(){})}catch(e){}})();</script>
+  <!--ANALYTICS-->
 </body>
 </html>

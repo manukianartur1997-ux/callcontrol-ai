@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { ANALYTICS_SCRIPT } = require("./lib/site-meta.cjs");
 
 const root = __dirname;
 const outDir = path.join(root, "dist");
@@ -57,6 +58,14 @@ async function build() {
   await require("./generate-public-landing-live")();
 
   copyDir(path.join(root, "platform"), path.join(outDir, "platform"));
+  // The platform demo is a static file, so the build substitutes the same
+  // opt-in analytics snippet the generators inject (empty unless
+  // CLARITY_PROJECT_ID is set at build time). See lib/site-meta.cjs.
+  const platformIndex = path.join(outDir, "platform", "index.html");
+  fs.writeFileSync(
+    platformIndex,
+    fs.readFileSync(platformIndex, "utf8").replace("<!--ANALYTICS-->", ANALYTICS_SCRIPT)
+  );
 
   console.log(`Cloudflare Pages build ready: hybrid demo room -> dist/`);
 }

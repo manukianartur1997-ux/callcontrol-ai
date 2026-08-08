@@ -131,37 +131,32 @@ APP_PIN=1234 node server.js
 
 Если задан `APP_PIN`, защищенные API принимают заголовок `X-App-Pin` или query `?pin=...`.
 
-## Аналитика (first-party beacon, без cookies)
+## Аналитика (Microsoft Clarity, opt-in)
 
-Публичные страницы (лендинги, `/platform/`, sample-отчёты) шлют fire-and-forget
-`POST /api/beacon` при загрузке — сниппет живёт в `lib/site-meta.cjs`
-(`BEACON_SCRIPT`) и вставляется генераторами, так что rebuild воспроизводит его.
-Privacy-sane by design: без cookies, без ID, IP и user-agent не сохраняются —
-только `path`, origin реферера, язык страницы и грубый бакет ширины экрана
-(`s`/`m`/`l`). Рендер страницы beacon не блокирует (инлайн в конце `<body>`,
-`navigator.sendBeacon` + fallback `fetch keepalive`, всё в try/catch).
+Workers Analytics Engine **убран**: его binding требует платного плана Workers
+и именно он завалил деплой 18.07.2026 (run 29658215356, шаг `Deploy Worker`).
+Вместе с ним убраны `POST /api/beacon` в воркере и локальная 204-заглушка.
 
-Worker (`cloudflare-worker.example.js` → `recordBeacon`) пишет события в
-Workers Analytics Engine dataset `callcontrol_pageviews`
-(binding `PAGEVIEWS`, см. `wrangler.toml`). Локальный `server.js` отвечает
-204-заглушкой. Cloudflare Web Analytics не используется (OAuth-токен wrangler
-не имеет `rum`-scope), Google Analytics/GTM — сознательно нет.
+Вместо него — **Microsoft Clarity**: бесплатно и без лимитов, даёт тепловые
+карты и записи сессий (Cloudflare Web Analytics можно добавить сверху, он
+тоже бесплатный и включается в панели Cloudflare без кода).
 
-Как посмотреть данные — SQL API Analytics Engine
-(`ACCOUNT_ID=55c8c0ba46ac72961fae28f92b50403e`, токен с правом Account
-Analytics Read):
+Clarity **не зашит в сборку** — подключается переменной окружения на этапе
+билда, поэтому по умолчанию страницы не делают ни одного стороннего запроса:
 
 ```bash
-curl -s "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/analytics_engine/sql" \
-  -H "Authorization: Bearer $CF_API_TOKEN" \
-  --data "SELECT blob1 AS path, count() AS views
-          FROM callcontrol_pageviews
-          WHERE timestamp > NOW() - INTERVAL '7' DAY
-          GROUP BY path ORDER BY views DESC"
+CLARITY_PROJECT_ID=xxxxxxxxxx npm run build
 ```
 
-Схема точки: `blob1` = path, `blob2` = referrer origin, `blob3` = язык,
-`blob4` = width bucket, `double1` = 1 (счётчик), `index1` = path.
+Сниппет живёт в `lib/site-meta.cjs` (`ANALYTICS_SCRIPT`) и вставляется
+генераторами в конец `<body>` на лендингах, `/platform/` и sample-отчётах.
+Без `CLARITY_PROJECT_ID` константа пустая — в HTML не попадает ничего.
+
+Чтобы включить на проде: завести проект на clarity.microsoft.com, взять
+Project ID и прописать его в workflow (`.github/workflows/deploy-cloudflare.yml`,
+шаг `Build static assets`) как переменную окружения или repo variable.
+
+Google Analytics / GTM — сознательно нет.
 
 ## Ручной MVP workflow
 

@@ -178,15 +178,18 @@ for (const p of ["/ru/", "/uk/", "/en/", "/platform/", "/samples/b2b-saas-en-sam
 }
 assertExcludes("dist/sitemap.xml", "hybrid-demo");
 
-// First-party analytics beacon: fire-and-forget client ping on every public
-// page + the /api/beacon Analytics Engine endpoint in the worker.
+// Analytics: Workers Analytics Engine is REMOVED - it needs a paid Workers
+// plan and its binding is what failed the 2026-07-18 deploy. A default build
+// must therefore ship no beacon and no analytics binding at all. Clarity is
+// opt-in at build time (CLARITY_PROJECT_ID), so it is absent here too.
 for (const file of ["dist/index.html", "dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html", "dist/platform/index.html", "dist/samples/b2b-saas-en-sample-report.html"]) {
-  assertIncludes(file, '"/api/beacon"');
-  assertIncludes(file, "sendBeacon");
+  assertExcludes(file, "/api/beacon");
+  assertExcludes(file, "sendBeacon");
+  assertExcludes(file, "clarity.ms");
 }
-assertIncludes("cloudflare-worker.example.js", "/api/beacon");
-assertIncludes("cloudflare-worker.example.js", "writeDataPoint");
-assertIncludes("wrangler.toml", "analytics_engine_datasets");
+assertExcludes("cloudflare-worker.example.js", "/api/beacon");
+assertExcludes("cloudflare-worker.example.js", "writeDataPoint");
+assertExcludes("wrangler.toml", "analytics_engine_datasets");
 
 // MONEY REPORT: the lost-revenue hero computation (dropped/under-pushed
 // leads × average check = $X/month) must ship on every locale as an

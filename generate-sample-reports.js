@@ -10,7 +10,7 @@
 const fs = require("fs");
 const path = require("path");
 const PDFDocument = require("pdfkit");
-const { SITE_ORIGIN, OG_IMAGE_PATH, FAVICON, BEACON_SCRIPT } = require("./lib/site-meta.cjs");
+const { SITE_ORIGIN, OG_IMAGE_PATH, FAVICON, ANALYTICS_SCRIPT } = require("./lib/site-meta.cjs");
 
 // pdfkit's built-in "Helvetica" etc. are the 14 standard PDF fonts, which
 // only support WinAnsi (Latin-1) glyphs - they silently cannot render
@@ -171,7 +171,7 @@ function renderSampleReportHtml(report, meta) {
     </div>
     ${cross}
   </main>
-  ${BEACON_SCRIPT}
+  ${ANALYTICS_SCRIPT}
 </body>
 </html>`;
 }
