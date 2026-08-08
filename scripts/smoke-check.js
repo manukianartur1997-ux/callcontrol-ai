@@ -178,6 +178,26 @@ for (const p of ["/ru/", "/uk/", "/en/", "/platform/", "/samples/b2b-saas-en-sam
 }
 assertExcludes("dist/sitemap.xml", "hybrid-demo");
 
+// One-pager PDFs: the artifact attached to cold emails. Assert all three
+// locales exist, are real PDFs, and are exactly one page — pdfkit adds pages
+// silently on overflow, so a copy edit could otherwise ship a two-page
+// "one-pager" to a prospect without anyone noticing.
+const fsPdf = require("fs");
+for (const locale of ["uk", "ru", "en"]) {
+  const file = `dist/onepager/callcontrol-onepager-${locale}.pdf`;
+  const bytes = fsPdf.readFileSync(file);
+  if (bytes.subarray(0, 5).toString() !== "%PDF-") {
+    throw new Error(`${file} is not a PDF`);
+  }
+  if (bytes.length < 10000) {
+    throw new Error(`${file} is suspiciously small (${bytes.length} bytes) — fonts may be missing`);
+  }
+  const pages = (bytes.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
+  if (pages !== 1) {
+    throw new Error(`${file} has ${pages} pages; a one-pager must be exactly 1`);
+  }
+}
+
 // Analytics: Workers Analytics Engine is REMOVED - it needs a paid Workers
 // plan and its binding is what failed the 2026-07-18 deploy. A default build
 // must therefore ship no beacon and no analytics binding at all. Clarity is

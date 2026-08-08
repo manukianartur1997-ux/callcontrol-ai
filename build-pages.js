@@ -57,6 +57,15 @@ async function build() {
   // pairs. Awaited because sample-report PDF rendering is async (pdfkit).
   await require("./generate-public-landing-live")();
 
+  // The one-page offer PDF (UA/RU/EN) — the artifact attached to cold emails.
+  // Built here so the copy stays in version control instead of a Downloads
+  // folder, and so a copy change can never overflow it to two pages unnoticed.
+  const { SITE_ORIGIN } = require("./lib/site-meta.cjs");
+  const onePagers = await require("./generate-onepager").generateOnePagers(outDir, {
+    siteOrigin: SITE_ORIGIN
+  });
+  console.log(`One-pager PDFs ready: ${onePagers.length} locales -> dist/onepager/`);
+
   copyDir(path.join(root, "platform"), path.join(outDir, "platform"));
   // The platform demo is a static file, so the build substitutes the same
   // opt-in analytics snippet the generators inject (empty unless
