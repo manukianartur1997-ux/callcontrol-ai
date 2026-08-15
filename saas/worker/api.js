@@ -788,6 +788,15 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     });
     const created = await signup.json().catch(() => null);
     if (!signup.ok) {
+      // GoTrue names its errors: don't lump every 4xx into email_exists —
+      // a rejected ADDRESS (bad TLD, malformed) is the caller's typo, not an
+      // existing account.
+      const gotrueCode = String(created?.error_code || created?.code || "");
+      if (gotrueCode === "email_address_invalid" || gotrueCode === "validation_failed") {
+        return json({ error: "bad_email" }, 400);
+      }
+      if (gotrueCode === "signup_disabled") return json({ error: "signup_closed" }, 503);
+      if (gotrueCode === "weak_password") return json({ error: "weak_password" }, 400);
       if (signup.status === 400 || signup.status === 422) {
         logAbuseSignal("register_org_email_rejected", email);
         return json({ error: "email_exists", hint: "sign_in_then_create" }, 409);

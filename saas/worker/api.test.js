@@ -1210,6 +1210,22 @@ test("register-org: confirmations-on signup returns the confirmation flag", asyn
   assert.equal(body.email_confirmation_required, true);
 });
 
+test("register-org: GoTrue email_address_invalid maps to bad_email, not email_exists", async () => {
+  const mock = createFetchMock();
+  mock.on("POST", "/auth/v1/signup", {
+    status: 400,
+    body: { code: 400, error_code: "email_address_invalid", msg: "Email address is invalid" }
+  });
+  const res = await makeApi(mock, ENV_SIGNUP).handle(
+    send("POST", "/api/app/register-org", {
+      signup_code: SIGNUP_CODE, org_name: "Ромашка", email: "x@invalid.test",
+      password: "fake-reg-pass-1"
+    })
+  );
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).error, "bad_email");
+});
+
 test("register-org: an existing email is GoTrue's empty-identities reply, no org is created", async () => {
   const mock = createFetchMock();
   mock.on("POST", "/auth/v1/signup", {
