@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "./supabase.js";
 import { fetchMe, normalizeMe } from "./api.js";
 import { copy } from "./copy.js";
+import { useLocale } from "./hooks.js";
 import { useHashRoute, navigate } from "./router.js";
 import { CenterSpinner, ErrorBox } from "./ui.jsx";
 import { Login } from "./Login.jsx";
@@ -29,6 +30,10 @@ export function App() {
   const [booting, setBooting] = useState(true);
   const [session, setSession] = useState(null);
   const route = useHashRoute();
+  // Subscribes the whole tree to locale switches: any change re-renders App
+  // and cascades through every mounted screen, so each render-time `copy`
+  // read picks up the new language (see the note at the top of copy.js).
+  useLocale();
 
   useEffect(() => {
     let mounted = true;

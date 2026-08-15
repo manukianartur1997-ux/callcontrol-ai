@@ -1,5 +1,15 @@
 // Formatting and mapping helpers shared by all screens. Pure functions only.
-import { copy } from "./copy.js";
+// Everything locale-sensitive resolves the CURRENT locale at call time (see
+// copy.js), so a locale switch changes dates, numbers and plurals on the very
+// next render.
+import { copy, getLocale } from "./copy.js";
+
+// UI locale -> Intl locale tag for dates and number grouping.
+const INTL_LOCALES = { uk: "uk-UA", ru: "ru-RU", en: "en-US" };
+
+function intlLocale() {
+  return INTL_LOCALES[getLocale()] || INTL_LOCALES.uk;
+}
 
 // 245 -> "4:05". Null-safe: unknown duration renders as a dash.
 export function fmtDuration(sec) {
@@ -12,7 +22,7 @@ export function fmtDateTime(iso) {
   if (!iso) return copy.common.dash;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return copy.common.dash;
-  return d.toLocaleString("ru-RU", {
+  return d.toLocaleString(intlLocale(), {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
@@ -20,20 +30,35 @@ export function fmtDateTime(iso) {
   });
 }
 
+// 148000 -> "148 000" (uk/ru) / "148,000" (en). Whole numbers only — the
+// money-at-risk figure is an estimate, decimals would fake precision it does
+// not have.
+export function fmtMoney(n) {
+  if (n == null || Number.isNaN(Number(n))) return copy.common.dash;
+  return new Intl.NumberFormat(intlLocale(), { maximumFractionDigits: 0 }).format(Number(n));
+}
+
 export function fmtDate(iso) {
   if (!iso) return copy.common.dash;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return copy.common.dash;
-  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return d.toLocaleDateString(intlLocale(), { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
-// Russian one/few/many: pluralRu(3, copy.plurals.calls) -> "звонка".
-export function pluralRu(n, [one, few, many]) {
-  const abs = Math.abs(n) % 100;
-  const d = abs % 10;
-  if (abs > 10 && abs < 20) return many;
-  if (d === 1) return one;
-  if (d >= 2 && d <= 4) return few;
+// Plural picker over a word-form array from copy.plurals: uk/ru dictionaries
+// carry three forms [one, few, many] (the same East Slavic one/few/many rule
+// covers both languages); the en dictionary carries two [one, other]. The
+// forms array arrives from the live copy proxy, so the shape always matches
+// the active locale. The historical name is kept to avoid churn in callers.
+export function pluralRu(n, forms) {
+  const abs = Math.abs(n);
+  if (forms.length === 2) return abs === 1 ? forms[0] : forms[1];
+  const [one, few, many] = forms;
+  const mod100 = abs % 100;
+  const mod10 = mod100 % 10;
+  if (mod100 > 10 && mod100 < 20) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
   return many;
 }
 
@@ -65,8 +90,9 @@ export function managerName(call, membersByUserId) {
 }
 
 // { status, error } from apiFetch, a supabase-js error, or a bare code string
-// -> human Russian text. Unknown codes fall through to the generic message
-// with the code appended so support can still identify the failure.
+// -> human text in the active locale. Unknown codes fall through to the
+// generic message with the code appended so support can still identify the
+// failure.
 export function humanApiError(err) {
   const map = copy.errors;
   const code =

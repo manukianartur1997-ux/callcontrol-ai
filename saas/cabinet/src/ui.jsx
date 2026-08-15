@@ -1,7 +1,34 @@
 // Small presentational building blocks shared by every screen.
 import { useEffect } from "react";
-import { copy } from "./copy.js";
+import { copy, LOCALES, setLocale } from "./copy.js";
+import { useLocale } from "./hooks.js";
 import { humanApiError, scoreTone } from "./format.js";
+
+// Compact uk|ru|en toggle. Lives in the sidebar footer and on the login
+// screen; the choice persists in localStorage "cc:locale" (see copy.js) and
+// re-renders the whole app via the subscription in App.
+export function LocaleSwitcher({ className }) {
+  const locale = useLocale();
+  return (
+    <div
+      className={className ? `locale-switch ${className}` : "locale-switch"}
+      role="group"
+      aria-label={copy.common.language}
+    >
+      {LOCALES.map((code) => (
+        <button
+          key={code}
+          type="button"
+          className={code === locale ? "locale-btn active" : "locale-btn"}
+          aria-pressed={code === locale}
+          onClick={() => setLocale(code)}
+        >
+          {code}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export function Spinner({ small }) {
   return <span className={small ? "spinner spinner-sm" : "spinner"} aria-label={copy.common.loading} />;

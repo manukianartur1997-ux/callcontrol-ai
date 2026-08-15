@@ -15,6 +15,7 @@ import { navigate } from "./router.js";
 import { joinWithInvite, registerOrg } from "./api.js";
 import { humanApiError } from "./format.js";
 import { BrandMark } from "./Shell.jsx";
+import { LocaleSwitcher } from "./ui.jsx";
 
 const MIN_PASSWORD = 8;
 
@@ -218,6 +219,7 @@ export function Login({ initialMode = "signin", inviteToken = null }) {
 
   return (
     <div className="auth-wrap">
+      <div className="auth-col">
       <div className="auth-card">
         <div className="auth-brand">
           <BrandMark />
@@ -318,6 +320,8 @@ export function Login({ initialMode = "signin", inviteToken = null }) {
             </button>
           </form>
         )}
+      </div>
+      <LocaleSwitcher className="locale-switch-auth" />
       </div>
     </div>
   );

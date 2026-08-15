@@ -93,6 +93,43 @@ export function fetchIntegrations(orgId) {
   return apiFetch(`/orgs/${orgId}/integrations`);
 }
 
+// Recording upload: the audio travels base64-encoded in a JSON body (worker
+// caps the payload at ~15MB); the Worker stores it, transcribes with Gemini
+// STT and analyzes in one request — expect it to take minutes, not seconds.
+export function uploadRecording(orgId, body) {
+  return apiFetch(`/orgs/${orgId}/recordings`, { method: "POST", body });
+}
+
+// PBX credentials live encrypted in integration_secrets; GET only ever
+// returns { configured, hints } — the browser never sees stored values.
+export function fetchIntegrationCredentials(orgId, kind) {
+  return apiFetch(`/orgs/${orgId}/integrations/${kind}/credentials`);
+}
+
+export function saveIntegrationCredentials(orgId, kind, fields) {
+  return apiFetch(`/orgs/${orgId}/integrations/${kind}/credentials`, {
+    method: "PUT",
+    body: { fields }
+  });
+}
+
+// Organization-level settings (avg_deal_amount, …). Answers 503
+// { error: "migration_required" } until migration 0004 is applied.
+export function saveOrgSettings(orgId, body) {
+  return apiFetch(`/orgs/${orgId}/org-settings`, { method: "PUT", body });
+}
+
+// Telegram delivery recipients (table arrives with migration 0004): GET ->
+// { recipients: [{ id, chat_id, kind, label }] }; PUT replaces the whole set
+// (max 10). Both answer 503 { error: "migration_required" } until then.
+export function fetchTelegramRecipients(orgId) {
+  return apiFetch(`/orgs/${orgId}/telegram`);
+}
+
+export function saveTelegramRecipients(orgId, recipients) {
+  return apiFetch(`/orgs/${orgId}/telegram`, { method: "PUT", body: { recipients } });
+}
+
 export function createMember(orgId, body) {
   return apiFetch(`/orgs/${orgId}/members`, { method: "POST", body });
 }
@@ -116,7 +153,12 @@ export function normalizeMe(raw) {
       role: m.role || "viewer",
       full_name: m.full_name || null,
       department_id: m.department_id || null,
-      plan: m.plan || m.org?.plan || null
+      plan: m.plan || m.org?.plan || null,
+      // Added by migration 0004; absent (null) until it lands. The dashboard
+      // and settings must render fine either way.
+      avg_deal_amount:
+        m.avg_deal_amount ?? m.organization?.avg_deal_amount ?? m.org?.avg_deal_amount ?? null,
+      ui_language: m.ui_language || m.organization?.ui_language || m.org?.ui_language || null
     }))
     .filter((m) => m.org_id);
 }

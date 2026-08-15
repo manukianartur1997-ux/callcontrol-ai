@@ -1,7 +1,7 @@
 // Application chrome: dark sidebar (top bar on narrow screens) + content
 // area. Navigation is plain <a href="#/..."> — the hash router picks it up.
 import { copy } from "./copy.js";
-import { Avatar } from "./ui.jsx";
+import { Avatar, LocaleSwitcher } from "./ui.jsx";
 
 // Gradient logo square, reused by Login. Pure CSS, no image assets.
 export function BrandMark() {
@@ -78,9 +78,12 @@ export function Shell({ me, active, route, onSwitchOrg, onSignOut, children }) {
               </span>
             </span>
           </a>
-          <button type="button" className="btn btn-ghost btn-sm btn-signout" onClick={onSignOut}>
-            {copy.common.signOut}
-          </button>
+          <div className="side-foot">
+            <button type="button" className="btn btn-ghost btn-sm btn-signout" onClick={onSignOut}>
+              {copy.common.signOut}
+            </button>
+            <LocaleSwitcher className="locale-switch-dark" />
+          </div>
         </div>
       </aside>
 

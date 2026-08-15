@@ -1,10 +1,25 @@
-// Settings: AI key (owner only), team management, telephony webhooks.
-// Member reads and extension edits go straight to Supabase (RLS gives
-// owner/admin write on memberships); key material and user creation go
-// through the Worker — the browser never sees a stored key, only its hint.
+// Settings: AI key (owner only), org parameters (owner only), team
+// management, telephony connections, Telegram delivery (owner/admin). Member
+// reads and extension edits go straight to Supabase (RLS gives owner/admin
+// write on memberships); key material, PBX credentials and user creation go
+// through the Worker — the browser never sees a stored secret, only its hint
+// or field names.
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase.js";
-import { createMember, fetchAiKey, fetchIntegrations, saveAiKey } from "./api.js";
+import {
+  createMember,
+  fetchAiKey,
+  fetchIntegrations,
+  fetchIntegrationCredentials,
+  fetchTelegramRecipients,
+  saveAiKey,
+  saveIntegrationCredentials,
+  saveOrgSettings,
+  saveTelegramRecipients
+} from "./api.js";
+// Shared connector manifest — plain data, no worker-only imports, so vite
+// bundles it into the cabinet without dragging the Worker along.
+import { PROVIDERS as TELEPHONY_PROVIDERS } from "../../worker/telephony.js";
 import { copy } from "./copy.js";
 import { useAsync } from "./hooks.js";
 import { fmtDateTime, humanApiError } from "./format.js";
@@ -18,9 +33,86 @@ export function Settings({ org }) {
     <div className="page">
       <h1 className="page-title">{t.title}</h1>
       {org.role === "owner" ? <AiKeyCard org={org} /> : null}
+      {org.role === "owner" ? <OrgSettingsCard org={org} /> : null}
       <TeamCard org={org} />
       <TelephonyCard org={org} />
+      {org.role === "owner" || org.role === "admin" ? <TelegramCard org={org} /> : null}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Organization parameters — owner only. Currently just avg_deal_amount; the
+// Worker answers 503 migration_required until migration 0004 is applied.
+// ---------------------------------------------------------------------------
+function OrgSettingsCard({ org }) {
+  const t = copy.settings.orgSettings;
+  const [amount, setAmount] = useState(
+    org.avg_deal_amount != null ? String(org.avg_deal_amount) : ""
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [ok, setOk] = useState(false);
+  const [migrationNeeded, setMigrationNeeded] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    const trimmed = amount.trim();
+    const value = trimmed === "" ? null : Number(trimmed.replace(",", "."));
+    if (value !== null && (!Number.isFinite(value) || value < 0)) {
+      setError(t.badAmount);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setOk(false);
+    try {
+      await saveOrgSettings(org.org_id, { avg_deal_amount: value });
+      setOk(true);
+    } catch (err) {
+      if (err && err.error === "migration_required") setMigrationNeeded(true);
+      else setError(humanApiError(err));
+    }
+    setBusy(false);
+  }
+
+  return (
+    <Card title={t.title}>
+      {migrationNeeded ? (
+        <p className="warning">{t.migrationRequired}</p>
+      ) : (
+        <form className="ai-form" onSubmit={submit}>
+          <label className="field field-narrow">
+            <span className="label">{t.avgDealLabel}</span>
+            <input
+              className="input"
+              type="number"
+              min="0"
+              step="any"
+              inputMode="decimal"
+              placeholder={t.avgDealPlaceholder}
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              disabled={busy}
+            />
+            <span className="field-hint">{t.avgDealHint}</span>
+          </label>
+          {error ? <div className="form-error">{error}</div> : null}
+          {ok && !error ? <div className="form-success">{t.saved}</div> : null}
+          <div className="form-actions">
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? (
+                <>
+                  <Spinner small /> {t.saving}
+                </>
+              ) : (
+                t.save
+              )}
+            </button>
+          </div>
+        </form>
+      )}
+    </Card>
   );
 }
 
@@ -464,48 +556,120 @@ function AddMemberForm({ org, onAdded }) {
 }
 
 // ---------------------------------------------------------------------------
-// (c) Telephony webhooks
+// (c) Telephony connections — an accordion over the shared PROVIDERS
+// manifest (saas/worker/telephony.js). A provider with an integrations row
+// renders as connected; one the database does not know yet (its kind is
+// absent from the GET response — pre-0004 CHECK constraint) renders muted as
+// "soon" with a migration note instead of a webhook.
 // ---------------------------------------------------------------------------
+function providerLabel(provider) {
+  return (
+    provider.displayName ||
+    provider.label ||
+    copy.settings.telephony.kinds[provider.kind] ||
+    provider.kind
+  );
+}
+
 function TelephonyCard({ org }) {
   const t = copy.settings.telephony;
+  const [openKind, setOpenKind] = useState(null);
   const { loading, data, error, reload } = useAsync(async () => {
     const raw = await fetchIntegrations(org.org_id);
     return Array.isArray(raw) ? raw : raw?.integrations || [];
   }, [org.org_id]);
 
+  const rows = data || [];
+  const rowByKind = Object.fromEntries(rows.map((r) => [r.kind, r]));
+  // Rows for kinds the manifest does not know keep rendering (nothing an
+  // operator provisioned may silently vanish from this screen).
+  const manifestKinds = new Set(TELEPHONY_PROVIDERS.map((p) => p.kind));
+  const extraProviders = rows
+    .filter((r) => !manifestKinds.has(r.kind))
+    .map((r) => ({ kind: r.kind, credentialFields: [] }));
+
   return (
     <Card title={t.title}>
+      <p className="muted">{t.intro}</p>
       {loading ? (
-        <SkeletonBlock lines={2} />
+        <SkeletonBlock lines={3} />
       ) : error ? (
         <ErrorBox error={error} onRetry={reload} />
-      ) : data.length === 0 ? (
-        <p className="muted">{t.empty}</p>
       ) : (
-        <>
-          <div className="integration-list">
-            {data.map((integration) => (
-              <IntegrationRow key={integration.kind} integration={integration} />
-            ))}
-          </div>
-          <p className="field-hint">{t.hint}</p>
-        </>
+        <div className="acc-list">
+          {[...TELEPHONY_PROVIDERS, ...extraProviders].map((provider) => (
+            <ProviderSection
+              key={provider.kind}
+              org={org}
+              provider={provider}
+              row={rowByKind[provider.kind] || null}
+              open={openKind === provider.kind}
+              onToggle={() =>
+                setOpenKind((k) => (k === provider.kind ? null : provider.kind))
+              }
+            />
+          ))}
+        </div>
       )}
     </Card>
   );
 }
 
-function IntegrationRow({ integration }) {
+function ProviderSection({ org, provider, row, open, onToggle }) {
+  const t = copy.settings.telephony;
+  const connected = Boolean(row);
+
+  const sectionClass = [
+    "acc-section",
+    connected ? "" : "acc-muted",
+    open ? "open" : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <section className={sectionClass}>
+      <button
+        type="button"
+        className="acc-head"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        <span className="acc-title">{providerLabel(provider)}</span>
+        <span className={connected ? "chip chip-green" : "chip chip-outline"}>
+          {connected ? t.statusConnected : t.statusSoon}
+        </span>
+        <span className="acc-chevron" aria-hidden="true">
+          {"▸"}
+        </span>
+      </button>
+
+      {open ? (
+        <div className="acc-body">
+          {connected ? (
+            <>
+              <WebhookBlock row={row} />
+              <CredentialsBlock org={org} provider={provider} />
+            </>
+          ) : (
+            <p className="muted">{t.soonNote}</p>
+          )}
+          <p className="field-hint">{provider.managerMappingHint || t.mappingFallback}</p>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function WebhookBlock({ row }) {
   const t = copy.settings.telephony;
   const [copied, setCopied] = useState(false);
 
   // The Worker returns a same-origin path; an absolute URL wins if present.
   const path =
-    integration.webhook_path ||
-    (integration.webhook_token
-      ? `/api/telephony/${integration.kind}/${integration.webhook_token}`
-      : "");
-  const url = integration.webhook_url || (path ? window.location.origin + path : "");
+    row.webhook_path ||
+    (row.webhook_token ? `/api/telephony/${row.kind}/${row.webhook_token}` : "");
+  const url = row.webhook_url || (path ? window.location.origin + path : "");
 
   async function copyUrl() {
     try {
@@ -518,13 +682,11 @@ function IntegrationRow({ integration }) {
   }
 
   return (
-    <div className="integration-row">
+    <div className="webhook-block">
       <div className="integration-head">
-        <span className="integration-kind">{t.kinds[integration.kind] || integration.kind}</span>
+        <span className="label">{t.webhookLabel}</span>
         <span className="muted">
-          {integration.last_event_at
-            ? `${t.lastEvent} ${fmtDateTime(integration.last_event_at)}`
-            : t.noEvents}
+          {row.last_event_at ? `${t.lastEvent} ${fmtDateTime(row.last_event_at)}` : t.noEvents}
         </span>
       </div>
       <div className="copy-row">
@@ -533,6 +695,300 @@ function IntegrationRow({ integration }) {
           {copied ? t.copied : t.copy}
         </button>
       </div>
+      <p className="field-hint">{t.hint}</p>
     </div>
+  );
+}
+
+// Credential form per manifest: secret fields render as password inputs, and
+// after a save the screen only ever shows configured/not — the Worker returns
+// field NAMES at most, never values.
+function CredentialsBlock({ org, provider }) {
+  const t = copy.settings.telephony;
+  const fields = provider.credentialFields || [];
+  const [values, setValues] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [saved, setSaved] = useState(false);
+
+  const status = useAsync(async () => {
+    if (!fields.length) return { configured: false };
+    try {
+      return await fetchIntegrationCredentials(org.org_id, provider.kind);
+    } catch (err) {
+      // 404 = kind exists but nothing stored / pre-manifest worker — both
+      // render as "not configured" rather than an error wall.
+      if (err && err.status === 404) return { configured: false };
+      throw err;
+    }
+  }, [org.org_id, provider.kind]);
+
+  if (!fields.length) return <p className="field-hint">{t.credsNoFields}</p>;
+
+  async function submit(e) {
+    e.preventDefault();
+    const filled = {};
+    for (const f of fields) {
+      const v = (values[f.key] || "").trim();
+      if (v) filled[f.key] = v;
+    }
+    if (!Object.keys(filled).length) return;
+    setBusy(true);
+    setSaveError(null);
+    setSaved(false);
+    try {
+      await saveIntegrationCredentials(org.org_id, provider.kind, filled);
+      setValues({}); // never keep secrets in state longer than needed
+      setSaved(true);
+      status.reload();
+    } catch (err) {
+      setSaveError(err);
+    }
+    setBusy(false);
+  }
+
+  const configured = Boolean(status.data?.configured);
+
+  return (
+    <form className="cred-block" onSubmit={submit}>
+      <h3 className="sub-title">{t.credsTitle}</h3>
+      {status.loading ? (
+        <SkeletonBlock lines={1} />
+      ) : status.error ? (
+        <ErrorBox error={status.error} onRetry={status.reload} />
+      ) : (
+        <p className="field-hint">{configured ? t.credsConfigured : t.credsNone}</p>
+      )}
+      <div className="field-row field-row-wrap">
+        {fields.map((f) => (
+          <label key={f.key} className="field">
+            <span className="label">{f.label || f.key}</span>
+            <input
+              className="input"
+              type={f.secret ? "password" : "text"}
+              autoComplete="off"
+              placeholder={f.placeholder || ""}
+              value={values[f.key] || ""}
+              onChange={(e) =>
+                setValues((v) => ({ ...v, [f.key]: e.target.value }))
+              }
+              disabled={busy}
+            />
+          </label>
+        ))}
+      </div>
+      {saveError ? <div className="form-error">{humanApiError(saveError)}</div> : null}
+      {saved && !saveError ? <div className="form-success">{t.credsSaved}</div> : null}
+      <div className="form-actions">
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          {busy ? (
+            <>
+              <Spinner small /> {t.credsSaving}
+            </>
+          ) : (
+            t.credsSave
+          )}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// (d) Telegram delivery — owner/admin. GET/PUT /orgs/:orgId/telegram; the
+// Worker answers 503 migration_required until migration 0004 lands, rendered
+// as the same muted note the org-settings card uses. PUT replaces the whole
+// recipient set, so the save button always sends every row.
+// ---------------------------------------------------------------------------
+const TELEGRAM_KINDS = ["per_call", "daily"];
+// Mirrors the Worker's validation: a numeric id, group chats lead with "-".
+const TELEGRAM_CHAT_ID_RE = /^-?\d{5,20}$/;
+const MAX_TELEGRAM_RECIPIENTS = 10;
+
+// Client-only identity for editable rows — index keys would make React reuse
+// input state across a mid-list removal.
+let telegramRowKey = 0;
+
+function TelegramCard({ org }) {
+  const t = copy.settings.telegram;
+  const { loading, data, error, reload } = useAsync(async () => {
+    try {
+      const raw = await fetchTelegramRecipients(org.org_id);
+      return { migration: false, recipients: raw?.recipients || [] };
+    } catch (err) {
+      if (err && err.error === "migration_required") return { migration: true, recipients: [] };
+      throw err;
+    }
+  }, [org.org_id]);
+
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState(null); // always a human string
+  const [ok, setOk] = useState(false);
+  const [migrationNeeded, setMigrationNeeded] = useState(false);
+
+  // Re-seed the editable rows whenever the server state (re)arrives.
+  useEffect(() => {
+    if (!data) return;
+    setRows(
+      data.recipients.map((r) => ({
+        key: ++telegramRowKey,
+        chat_id: String(r.chat_id ?? ""),
+        label: r.label || "",
+        kind: TELEGRAM_KINDS.includes(r.kind) ? r.kind : "per_call"
+      }))
+    );
+  }, [data]);
+
+  const migration = migrationNeeded || Boolean(data?.migration);
+
+  function setRow(key, field, value) {
+    setRows((list) => list.map((r) => (r.key === key ? { ...r, [field]: value } : r)));
+  }
+
+  function addRow() {
+    setRows((list) =>
+      list.length >= MAX_TELEGRAM_RECIPIENTS
+        ? list
+        : [...list, { key: ++telegramRowKey, chat_id: "", label: "", kind: "per_call" }]
+    );
+  }
+
+  function removeRow(key) {
+    setRows((list) => list.filter((r) => r.key !== key));
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    setOk(false);
+    // A row added and left fully blank is dropped silently, not an error.
+    const kept = rows.filter((r) => r.chat_id.trim() || r.label.trim());
+    for (const r of kept) {
+      const id = r.chat_id.trim();
+      if (!TELEGRAM_CHAT_ID_RE.test(id)) {
+        setSaveError(id ? t.badChatId.replace("{value}", id) : t.emptyChatId);
+        return;
+      }
+    }
+    setBusy(true);
+    setSaveError(null);
+    try {
+      await saveTelegramRecipients(
+        org.org_id,
+        kept.map((r) => ({ chat_id: r.chat_id.trim(), kind: r.kind, label: r.label.trim() }))
+      );
+      setOk(true);
+      reload(); // pick up server ids and the canonical order
+    } catch (err) {
+      if (err && err.error === "migration_required") setMigrationNeeded(true);
+      else setSaveError(humanApiError(err));
+    }
+    setBusy(false);
+  }
+
+  return (
+    <Card title={t.title}>
+      <p className="muted">{t.intro}</p>
+      {loading ? (
+        <SkeletonBlock lines={2} />
+      ) : error ? (
+        <ErrorBox error={error} onRetry={reload} />
+      ) : migration ? (
+        // Same muted state and copy key as the avg-deal (org-settings) card.
+        <p className="warning">{copy.settings.orgSettings.migrationRequired}</p>
+      ) : (
+        <>
+          <form className="ai-form" onSubmit={submit}>
+            {rows.length === 0 ? <p className="muted">{t.empty}</p> : null}
+            <div className="tg-rows">
+              {rows.map((r) => (
+                <div key={r.key} className="tg-row">
+                  <label className="field tg-field-chat">
+                    <span className="label">{t.chatId}</span>
+                    <input
+                      className="input mono"
+                      type="text"
+                      inputMode="numeric"
+                      placeholder={t.chatIdPlaceholder}
+                      value={r.chat_id}
+                      onChange={(e) => setRow(r.key, "chat_id", e.target.value)}
+                      disabled={busy}
+                    />
+                  </label>
+                  <label className="field tg-field-label">
+                    <span className="label">{t.labelField}</span>
+                    <input
+                      className="input"
+                      type="text"
+                      maxLength={120}
+                      placeholder={t.labelPlaceholder}
+                      value={r.label}
+                      onChange={(e) => setRow(r.key, "label", e.target.value)}
+                      disabled={busy}
+                    />
+                  </label>
+                  <label className="field tg-field-kind">
+                    <span className="label">{t.kindField}</span>
+                    <select
+                      className="input"
+                      value={r.kind}
+                      onChange={(e) => setRow(r.key, "kind", e.target.value)}
+                      disabled={busy}
+                    >
+                      {TELEGRAM_KINDS.map((k) => (
+                        <option key={k} value={k}>
+                          {t.kinds[k]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm tg-remove"
+                    onClick={() => removeRow(r.key)}
+                    disabled={busy}
+                  >
+                    {t.remove}
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {rows.length >= MAX_TELEGRAM_RECIPIENTS ? (
+              <p className="field-hint">{t.maxNote}</p>
+            ) : null}
+            {saveError ? <div className="form-error">{saveError}</div> : null}
+            {ok && !saveError ? <div className="form-success">{t.saved}</div> : null}
+
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={addRow}
+                disabled={busy || rows.length >= MAX_TELEGRAM_RECIPIENTS}
+              >
+                {t.add}
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={busy}>
+                {busy ? (
+                  <>
+                    <Spinner small /> {t.saving}
+                  </>
+                ) : (
+                  t.save
+                )}
+              </button>
+            </div>
+          </form>
+
+          <details className="tg-help">
+            <summary>{t.helpTitle}</summary>
+            <p>{t.helpPersonal}</p>
+            <p>{t.helpGroup}</p>
+            <p>{t.helpToken}</p>
+          </details>
+        </>
+      )}
+    </Card>
   );
 }

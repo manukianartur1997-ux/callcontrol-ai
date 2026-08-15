@@ -1,6 +1,14 @@
 // Small shared hooks. One async-loader pattern for every screen keeps the
 // loading / error / reload behavior identical everywhere.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { getLocale, subscribeLocale } from "./copy.js";
+
+// Current UI locale as reactive state. App calls it once at the root so a
+// locale switch re-renders the entire mounted tree (nothing memoizes copy
+// strings); the LocaleSwitcher calls it too for its own highlight.
+export function useLocale() {
+  return useSyncExternalStore(subscribeLocale, getLocale);
+}
 
 // Runs `fn` on mount and whenever `deps` change; exposes { loading, data,
 // error, reload }. Cancellation guard prevents state updates after unmount

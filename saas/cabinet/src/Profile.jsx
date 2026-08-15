@@ -2,6 +2,10 @@
 // user block. Everything here runs under the user's own Supabase session via
 // supabase.auth.updateUser — no Worker endpoint and no service key involved.
 //
+// Layout: page header + a two-column card grid (identity: avatar + name;
+// security: email + password) that collapses to one column under 900px.
+// Field/label rhythm intentionally matches Settings (.field/.label/.input).
+//
 // Name and avatar live in auth user_metadata and affect only how the user
 // sees themselves; memberships.full_name (what the team sees) is owner-managed
 // and deliberately untouched here.
@@ -52,71 +56,34 @@ export function Profile({ session }) {
   // so every save below re-renders this page with fresh metadata.
   const meta = session.user.user_metadata || {};
   return (
-    <div className="page page-narrow">
+    <div className="page">
       <div className="page-head">
         <h1 className="page-title">{copy.profile.title}</h1>
       </div>
-      <NameCard meta={meta} />
-      <PhotoCard meta={meta} email={session.user.email} />
-      <EmailCard email={session.user.email} />
-      <PasswordCard />
+      <div className="profile-grid">
+        <IdentityCard meta={meta} email={session.user.email} />
+        <SecurityCard email={session.user.email} />
+      </div>
     </div>
   );
 }
 
-function NameCard({ meta }) {
-  const [name, setName] = useState(meta.full_name || "");
-  const [busy, setBusy] = useState(false);
-  const [ok, setOk] = useState(false);
-  const [error, setError] = useState(null);
-
-  async function save(e) {
-    e.preventDefault();
-    setBusy(true);
-    setOk(false);
-    setError(null);
-    const { error: err } = await supabase.auth.updateUser({
-      data: { full_name: name.trim() || null }
-    });
-    setBusy(false);
-    if (err) setError(humanApiError(err));
-    else setOk(true);
-  }
-
+// ---------------------------------------------------------------------------
+// Identity: avatar + display name in one card.
+// ---------------------------------------------------------------------------
+function IdentityCard({ meta, email }) {
   return (
-    <Card title={copy.profile.nameTitle}>
-      <form className="profile-form" onSubmit={save}>
-        <label className="field">
-          <span className="label">{copy.profile.nameLabel}</span>
-          <input
-            className="input"
-            type="text"
-            autoComplete="name"
-            placeholder={copy.login.fullNamePlaceholder}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            disabled={busy}
-          />
-        </label>
-        <p className="profile-note">{copy.profile.nameNote}</p>
-        {error ? (
-          <div className="form-error" role="alert">
-            {error}
-          </div>
-        ) : null}
-        {ok ? <p className="form-ok">{copy.profile.saved}</p> : null}
-        <div className="form-actions">
-          <button className="btn btn-primary" type="submit" disabled={busy}>
-            {busy ? <Spinner small /> : null}
-            {busy ? copy.profile.saving : copy.profile.save}
-          </button>
-        </div>
-      </form>
+    <Card title={copy.profile.identityTitle}>
+      <div className="profile-stack">
+        <PhotoBlock meta={meta} email={email} />
+        <hr className="card-divider" />
+        <NameBlock meta={meta} />
+      </div>
     </Card>
   );
 }
 
-function PhotoCard({ meta, email }) {
+function PhotoBlock({ meta, email }) {
   const [busy, setBusy] = useState(false);
   const [okText, setOkText] = useState(null);
   const [error, setError] = useState(null);
@@ -153,47 +120,104 @@ function PhotoCard({ meta, email }) {
   }
 
   return (
-    <Card title={copy.profile.photoTitle}>
-      <div className="profile-form">
-        <div className="profile-avatar-row">
-          <Avatar name={displayName} src={current || meta.picture || meta.avatar_url || null} size={64} />
-          <div className="profile-avatar-actions">
-            <label className={busy ? "btn btn-ghost btn-disabled" : "btn btn-ghost"}>
-              {copy.profile.photoUpload}
-              <input
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={onFile}
-                disabled={busy}
-              />
-            </label>
-            {current ? (
-              <button
-                type="button"
-                className="btn btn-ghost"
-                disabled={busy}
-                onClick={() => saveAvatar(null, copy.profile.photoRemoved)}
-              >
-                {copy.profile.photoRemove}
-              </button>
-            ) : null}
-            {busy ? <Spinner small /> : null}
-          </div>
+    <div className="profile-block">
+      <div className="profile-avatar-row">
+        <Avatar name={displayName} src={current || meta.picture || meta.avatar_url || null} size={64} />
+        <div className="profile-avatar-actions">
+          <label className={busy ? "btn btn-ghost btn-disabled" : "btn btn-ghost"}>
+            {copy.profile.photoUpload}
+            <input type="file" accept="image/*" hidden onChange={onFile} disabled={busy} />
+          </label>
+          {current ? (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={busy}
+              onClick={() => saveAvatar(null, copy.profile.photoRemoved)}
+            >
+              {copy.profile.photoRemove}
+            </button>
+          ) : null}
+          {busy ? <Spinner small /> : null}
         </div>
-        <p className="profile-note">{copy.profile.photoNote}</p>
-        {error ? (
-          <div className="form-error" role="alert">
-            {error}
-          </div>
-        ) : null}
-        {okText ? <p className="form-ok">{okText}</p> : null}
+      </div>
+      <p className="field-hint">{copy.profile.photoNote}</p>
+      {error ? (
+        <div className="form-error" role="alert">
+          {error}
+        </div>
+      ) : null}
+      {okText ? <p className="form-ok">{okText}</p> : null}
+    </div>
+  );
+}
+
+function NameBlock({ meta }) {
+  const [name, setName] = useState(meta.full_name || "");
+  const [busy, setBusy] = useState(false);
+  const [ok, setOk] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function save(e) {
+    e.preventDefault();
+    setBusy(true);
+    setOk(false);
+    setError(null);
+    const { error: err } = await supabase.auth.updateUser({
+      data: { full_name: name.trim() || null }
+    });
+    setBusy(false);
+    if (err) setError(humanApiError(err));
+    else setOk(true);
+  }
+
+  return (
+    <form className="profile-block" onSubmit={save}>
+      <label className="field">
+        <span className="label">{copy.profile.nameLabel}</span>
+        <input
+          className="input"
+          type="text"
+          autoComplete="name"
+          placeholder={copy.login.fullNamePlaceholder}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          disabled={busy}
+        />
+        <span className="field-hint">{copy.profile.nameNote}</span>
+      </label>
+      {error ? (
+        <div className="form-error" role="alert">
+          {error}
+        </div>
+      ) : null}
+      {ok ? <p className="form-ok">{copy.profile.saved}</p> : null}
+      <div className="form-actions">
+        <button className="btn btn-primary" type="submit" disabled={busy}>
+          {busy ? <Spinner small /> : null}
+          {busy ? copy.profile.saving : copy.profile.save}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Security: email change + password change in one card.
+// ---------------------------------------------------------------------------
+function SecurityCard({ email }) {
+  return (
+    <Card title={copy.profile.securityTitle}>
+      <div className="profile-stack">
+        <EmailBlock email={email} />
+        <hr className="card-divider" />
+        <PasswordBlock />
       </div>
     </Card>
   );
 }
 
-function EmailCard({ email }) {
+function EmailBlock({ email }) {
   const [next, setNext] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
@@ -215,55 +239,57 @@ function EmailCard({ email }) {
   }
 
   return (
-    <Card title={copy.profile.emailTitle}>
-      <form className="profile-form" onSubmit={save}>
-        <p className="profile-note">
+    <form className="profile-block" onSubmit={save}>
+      <div className="field">
+        <span className="label">{copy.profile.emailTitle}</span>
+        <p className="profile-current">
           {copy.profile.emailCurrent} <strong>{email}</strong>
         </p>
-        <label className="field">
-          <span className="label">{copy.profile.emailLabel}</span>
-          <input
-            className="input"
-            type="email"
-            required
-            autoComplete="email"
-            placeholder={copy.login.emailPlaceholder}
-            value={next}
-            onChange={(e) => setNext(e.target.value)}
-            disabled={busy}
-          />
-        </label>
-        <p className="profile-note">{copy.profile.emailNote}</p>
-        {error ? (
-          <div className="form-error" role="alert">
-            {error}
-          </div>
-        ) : null}
-        {sent ? <p className="form-ok">{copy.profile.emailSent}</p> : null}
-        <div className="form-actions">
-          <button className="btn btn-primary" type="submit" disabled={busy}>
-            {busy ? <Spinner small /> : null}
-            {busy ? copy.profile.saving : copy.profile.save}
-          </button>
+      </div>
+      <label className="field">
+        <span className="label">{copy.profile.emailLabel}</span>
+        <input
+          className="input"
+          type="email"
+          required
+          autoComplete="email"
+          placeholder={copy.login.emailPlaceholder}
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          disabled={busy}
+        />
+        <span className="field-hint">{copy.profile.emailNote}</span>
+      </label>
+      {error ? (
+        <div className="form-error" role="alert">
+          {error}
         </div>
-      </form>
-    </Card>
+      ) : null}
+      {sent ? <p className="form-ok">{copy.profile.emailSent}</p> : null}
+      <div className="form-actions">
+        <button className="btn btn-primary" type="submit" disabled={busy}>
+          {busy ? <Spinner small /> : null}
+          {busy ? copy.profile.saving : copy.profile.save}
+        </button>
+      </div>
+    </form>
   );
 }
 
-function PasswordCard() {
+function PasswordBlock() {
   const [open, setOpen] = useState(false);
   return (
-    <Card title={copy.profile.passwordTitle}>
-      <div className="profile-form">
-        <p className="profile-note">{copy.profile.passwordNote}</p>
-        <div className="form-actions">
-          <button type="button" className="btn btn-ghost" onClick={() => setOpen(true)}>
-            {copy.password.change}
-          </button>
-        </div>
+    <div className="profile-block">
+      <div className="field">
+        <span className="label">{copy.profile.passwordTitle}</span>
+        <p className="field-hint">{copy.profile.passwordNote}</p>
+      </div>
+      <div className="form-actions">
+        <button type="button" className="btn btn-ghost" onClick={() => setOpen(true)}>
+          {copy.password.change}
+        </button>
       </div>
       {open ? <PasswordModal onClose={() => setOpen(false)} /> : null}
-    </Card>
+    </div>
   );
 }

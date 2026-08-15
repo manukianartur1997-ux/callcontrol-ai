@@ -59,7 +59,7 @@ export function PasswordModal({ onClose }) {
       ) : (
         <form onSubmit={submit} className="modal-body">
           <label className="field">
-            <span className="field-label">{copy.password.newLabel}</span>
+            <span className="label">{copy.password.newLabel}</span>
             <input
               className="input"
               type="password"
@@ -71,7 +71,7 @@ export function PasswordModal({ onClose }) {
             />
           </label>
           <label className="field">
-            <span className="field-label">{copy.password.repeatLabel}</span>
+            <span className="label">{copy.password.repeatLabel}</span>
             <input
               className="input"
               type="password"
