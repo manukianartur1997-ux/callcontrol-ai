@@ -147,6 +147,7 @@ export function Login({ initialMode = "signin", inviteToken = null }) {
       if (code === "bad_signup_code") setError(copy.login.register.badCode);
       else if (code === "signup_closed") setError(copy.login.register.closed);
       else if (code === "email_exists") setError(copy.login.register.emailExists);
+      else if (code === "email_rate_limited") setError(copy.login.register.rateLimited);
       else if (code === "weak_password") setError(copy.errors.weak_password);
       else setError(humanApiError(err));
       return;

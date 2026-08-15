@@ -796,6 +796,11 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
         return json({ error: "bad_email" }, 400);
       }
       if (gotrueCode === "signup_disabled") return json({ error: "signup_closed" }, 503);
+      // Supabase's built-in SMTP allows only a couple of confirmation mails
+      // per hour — a platform limit, not a duplicate account.
+      if (gotrueCode === "over_email_send_rate_limit") {
+        return json({ error: "email_rate_limited" }, 429);
+      }
       if (gotrueCode === "weak_password") return json({ error: "weak_password" }, 400);
       if (signup.status === 400 || signup.status === 422) {
         logAbuseSignal("register_org_email_rejected", email);
