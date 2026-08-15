@@ -1,8 +1,7 @@
 // Application chrome: dark sidebar (top bar on narrow screens) + content
 // area. Navigation is plain <a href="#/..."> — the hash router picks it up.
-import { useState } from "react";
 import { copy } from "./copy.js";
-import { PasswordModal } from "./PasswordModal.jsx";
+import { Avatar } from "./ui.jsx";
 
 // Gradient logo square, reused by Login. Pure CSS, no image assets.
 export function BrandMark() {
@@ -10,13 +9,19 @@ export function BrandMark() {
 }
 
 export function Shell({ me, active, route, onSwitchOrg, onSignOut, children }) {
-  const [passwordOpen, setPasswordOpen] = useState(false);
   const canSettings = active.role === "owner" || active.role === "admin";
   const navItems = [
     { page: "dashboard", href: "#/", label: copy.nav.dashboard },
     { page: "calls", href: "#/calls", label: copy.nav.calls }
   ];
   if (canSettings) navItems.push({ page: "settings", href: "#/settings", label: copy.nav.settings });
+
+  // The user's own name (auth user_metadata) wins over the owner-managed
+  // membership name; the email is the last resort. Avatar preference mirrors
+  // this: self-uploaded picture first, then whatever the OAuth provider gave.
+  const meta = me.user.user_metadata || {};
+  const displayName = meta.full_name || active.full_name || me.user.email;
+  const avatarSrc = meta.avatar || meta.picture || meta.avatar_url || null;
 
   return (
     <div className="shell">
@@ -58,18 +63,21 @@ export function Shell({ me, active, route, onSwitchOrg, onSignOut, children }) {
         </nav>
 
         <div className="side-user">
-          <div className="user-name">{active.full_name || me.user.email}</div>
-          <div className="user-meta">
-            {copy.roles[active.role] || active.role}
-            {active.full_name ? ` · ${me.user.email}` : ""}
-          </div>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm btn-signout"
-            onClick={() => setPasswordOpen(true)}
+          <a
+            className={route.page === "profile" ? "side-user-link active" : "side-user-link"}
+            href="#/profile"
+            aria-label={copy.nav.profile}
+            title={copy.nav.profile}
           >
-            {copy.password.change}
-          </button>
+            <Avatar name={displayName} src={avatarSrc} size={36} />
+            <span className="side-user-text">
+              <span className="user-name">{displayName}</span>
+              <span className="user-meta">
+                {copy.roles[active.role] || active.role}
+                {displayName !== me.user.email ? ` · ${me.user.email}` : ""}
+              </span>
+            </span>
+          </a>
           <button type="button" className="btn btn-ghost btn-sm btn-signout" onClick={onSignOut}>
             {copy.common.signOut}
           </button>
@@ -77,8 +85,6 @@ export function Shell({ me, active, route, onSwitchOrg, onSignOut, children }) {
       </aside>
 
       <main className="content">{children}</main>
-
-      {passwordOpen ? <PasswordModal onClose={() => setPasswordOpen(false)} /> : null}
     </div>
   );
 }

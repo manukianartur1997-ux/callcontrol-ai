@@ -29,6 +29,31 @@ export function ErrorBox({ error, onRetry }) {
   );
 }
 
+// User picture with an initials-circle fallback. `src` is a data-URL from
+// user_metadata.avatar (or an OAuth provider picture URL); `name` feeds the
+// initials — first letters of the first two words, or the email's first char.
+export function Avatar({ name, src, size = 36 }) {
+  const dim = { width: size, height: size };
+  if (src) return <img className="avatar" style={dim} src={src} alt="" />;
+  const initials =
+    String(name || "")
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase() || "?";
+  return (
+    <span
+      className="avatar avatar-initials"
+      style={{ ...dim, fontSize: Math.max(11, Math.round(size * 0.38)) }}
+      aria-hidden="true"
+    >
+      {initials}
+    </span>
+  );
+}
+
 export function EmptyState({ title, text, action }) {
   return (
     <div className="empty">

@@ -36,7 +36,14 @@ const INTEGRATION_ID = "66666666-6666-4666-8666-666666666666";
 const NEW_USER_ID = "77777777-7777-4777-8777-777777777777";
 const DEPARTMENT_ID = "88888888-8888-4888-8888-888888888888";
 
+const INVITE_ID = "99999999-9999-4999-8999-999999999999";
+const NEW_ORG_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
 const GOOD_TOKEN = "good-jwt-token-for-tests";
+const INVITE_TOKEN = "abcdef0123456789abcdef0123456789abcdef0123456789"; // 48 hex — matches the DB generator exactly
+const SIGNUP_CODE = "fake-pilot-signup-code"; // synthetic — never the real gate
+const PUBLISHABLE = "sb_publishable_fake_for_tests";
+const ENV_SIGNUP = { ...ENV, SIGNUP_CODE, SUPABASE_PUBLISHABLE_KEY: PUBLISHABLE };
 const GEMINI_PLAIN_KEY = "AIzaFakePilotKey0001"; // synthetic — never a real key
 const RINGO_TOKEN = "ringotokenaaaa1111";
 const BINO_TOKEN = "binotokenbbbb2222";
@@ -171,7 +178,10 @@ function send(method, path, body, token, contentType = "application/json") {
 function seedAuth(mock) {
   mock.on("GET", "/auth/v1/user", (record) =>
     record.headers.authorization === `Bearer ${GOOD_TOKEN}`
-      ? { status: 200, body: { id: USER_ID, email: "owner@pilot.test" } }
+      ? {
+          status: 200,
+          body: { id: USER_ID, email: "owner@pilot.test", user_metadata: { full_name: "Артур" } }
+        }
       : { status: 401, body: { msg: "invalid jwt" } }
   );
 }
@@ -213,6 +223,39 @@ async function seedAnalyze(mock, { role = "owner", usageRow = null, quota = 500,
   mock.on("POST", "/rest/v1/usage_counters", (record) => ({ status: 201, body: [record.body] }));
   mock.on("PATCH", "/rest/v1/usage_counters", (record) => ({ status: 200, body: [record.body] }));
   mock.on("PATCH", "/rest/v1/org_ai_keys", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+}
+
+// A pending invite; overrides let each test break exactly one validity rule.
+function seedInvite(mock, overrides = {}) {
+  const invite = {
+    id: INVITE_ID,
+    org_id: ORG_ID,
+    email: "new@pilot.test",
+    role: "manager",
+    department_id: DEPARTMENT_ID,
+    token: INVITE_TOKEN,
+    invited_by: USER_ID,
+    expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    accepted_at: null,
+    ...overrides
+  };
+  mock.on("GET", "/rest/v1/invites", (record) =>
+    record.url.includes(`token=eq.${INVITE_TOKEN}`) ? { body: [invite] } : { body: [] }
+  );
+  return invite;
+}
+
+// Everything createOrganization() writes; the org insert echoes the row back
+// (return=representation) so the worker can read the new id.
+function seedOrgCreation(mock) {
+  mock.on("POST", "/rest/v1/organizations", (record) => ({
+    status: 201,
+    body: [{ ...record.body, id: NEW_ORG_ID }]
+  }));
+  mock.on("POST", "/rest/v1/memberships", { status: 201 });
+  mock.on("POST", "/rest/v1/checklists", { status: 201 });
+  mock.on("POST", "/rest/v1/integrations", { status: 201 });
   mock.on("POST", "/rest/v1/audit_log", { status: 201 });
 }
 
@@ -320,7 +363,12 @@ test("/me returns the user plus memberships with the embedded organization", asy
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("cache-control"), "no-store");
   const body = await res.json();
-  assert.deepEqual(body.user, { id: USER_ID, email: "owner@pilot.test" });
+  // user_metadata now rides along — the cabinet header needs full_name/avatar.
+  assert.deepEqual(body.user, {
+    id: USER_ID,
+    email: "owner@pilot.test",
+    user_metadata: { full_name: "Артур" }
+  });
   assert.equal(body.memberships[0].role, "owner");
   assert.equal(body.memberships[0].organization.slug, "pilot-co");
 
@@ -838,4 +886,408 @@ test("webhook: a binotel non-completed requestType is ignored", async () => {
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { ok: true, ignored: true });
   assert.equal(mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/calls")), false);
+});
+
+// ---------------------------------------------------------------------------
+// Onboarding: /join (public, invite + fresh account)
+// ---------------------------------------------------------------------------
+
+test("join: a valid invite creates the confirmed account and the membership", async () => {
+  const mock = createFetchMock();
+  seedInvite(mock);
+  mock.on("POST", "/auth/v1/admin/users", { status: 200, body: { id: NEW_USER_ID } });
+  mock.on("POST", "/rest/v1/memberships", { status: 201 });
+  mock.on("PATCH", "/rest/v1/invites", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+
+  // Mixed-case email on purpose: the invite says new@pilot.test.
+  const res = await makeApi(mock).handle(
+    send("POST", "/api/app/join", {
+      token: INVITE_TOKEN,
+      email: "New@pilot.test",
+      password: "fake-join-pass-1",
+      full_name: "Новый Менеджер"
+    })
+  );
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true });
+
+  const authCreate = mock.requests.find((r) => r.url.includes("/auth/v1/admin/users"));
+  assert.equal(authCreate.body.email, "New@pilot.test");
+  assert.equal(authCreate.body.email_confirm, true);
+  assert.deepEqual(authCreate.body.user_metadata, { full_name: "Новый Менеджер" });
+
+  const membership = mock.requests.find(
+    (r) => r.method === "POST" && r.url.includes("/rest/v1/memberships")
+  );
+  assert.equal(membership.body.org_id, ORG_ID);
+  assert.equal(membership.body.user_id, NEW_USER_ID);
+  assert.equal(membership.body.role, "manager", "role comes from the invite");
+  assert.equal(membership.body.department_id, DEPARTMENT_ID, "department comes from the invite");
+  assert.equal(membership.body.status, "active");
+  assert.equal(membership.body.invited_by, USER_ID);
+
+  const invitePatch = mock.requests.find(
+    (r) => r.method === "PATCH" && r.url.includes("/rest/v1/invites")
+  );
+  assert.match(decodeURIComponent(invitePatch.url), new RegExp(`id=eq\\.${INVITE_ID}`));
+  assert.ok(invitePatch.body.accepted_at);
+  assert.equal(invitePatch.body.accepted_by, NEW_USER_ID);
+
+  const audit = mock.requests.find((r) => r.method === "POST" && r.url.includes("audit_log"));
+  assert.equal(audit.body.action, "invite.accepted");
+  assert.equal(audit.body.org_id, ORG_ID);
+  assert.deepEqual(audit.body.meta, { role: "manager" });
+  assert.equal(audit.init.body.includes("fake-join-pass-1"), false, "password stays out of the audit");
+});
+
+test("join: missing, used, expired and wrong-email invites are ONE generic invite_invalid", async () => {
+  const past = new Date(Date.now() - 60_000).toISOString();
+  const cases = [
+    { name: "unknown token", email: "new@pilot.test", overrides: {}, token: "0123456789abcdef0123456789abcdef" },
+    { name: "wrong email", email: "other@pilot.test", overrides: {} },
+    { name: "already used", email: "new@pilot.test", overrides: { accepted_at: "2026-08-01T00:00:00Z" } },
+    { name: "expired", email: "new@pilot.test", overrides: { expires_at: past } }
+  ];
+
+  for (const c of cases) {
+    const mock = createFetchMock();
+    seedInvite(mock, c.overrides);
+    // If the worker ever got this far, the leak would be visible below.
+    mock.on("POST", "/auth/v1/admin/users", { status: 200, body: { id: NEW_USER_ID } });
+
+    const res = await makeApi(mock).handle(
+      send("POST", "/api/app/join", {
+        token: c.token || INVITE_TOKEN,
+        email: c.email,
+        password: "fake-join-pass-1"
+      })
+    );
+    assert.equal(res.status, 404, c.name);
+    assert.deepEqual(await res.json(), { error: "invite_invalid" }, c.name);
+    assert.equal(
+      mock.requests.some((r) => r.url.includes("/auth/v1/admin/users")),
+      false,
+      `${c.name}: no auth user may be created for an invalid invite`
+    );
+  }
+});
+
+test("join: a short password is 400 before anything leaves the worker", async () => {
+  const mock = createFetchMock();
+  seedInvite(mock);
+  const res = await makeApi(mock).handle(
+    send("POST", "/api/app/join", { token: INVITE_TOKEN, email: "new@pilot.test", password: "short" })
+  );
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: "weak_password" });
+  assert.equal(mock.requests.length, 0);
+});
+
+test("join: an already-registered email answers 409 with the sign-in hint", async () => {
+  const mock = createFetchMock();
+  seedInvite(mock);
+  mock.on("POST", "/auth/v1/admin/users", { status: 422, body: { msg: "already registered" } });
+
+  const res = await makeApi(mock).handle(
+    send("POST", "/api/app/join", { token: INVITE_TOKEN, email: "new@pilot.test", password: "fake-join-pass-1" })
+  );
+  assert.equal(res.status, 409);
+  assert.deepEqual(await res.json(), { error: "email_exists", hint: "sign_in_then_join" });
+  // The invite stays spendable for the authed retry.
+  assert.equal(mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/memberships")), false);
+  assert.equal(mock.requests.some((r) => r.method === "PATCH" && r.url.includes("/rest/v1/invites")), false);
+});
+
+// ---------------------------------------------------------------------------
+// Onboarding: /join-authed (existing account joins by invite)
+// ---------------------------------------------------------------------------
+
+test("join-authed: the signed-in user joins the org their email was invited to", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  // Mixed case vs the authed owner@pilot.test — matching is case-insensitive.
+  seedInvite(mock, { email: "Owner@pilot.test" });
+  mock.on("POST", "/rest/v1/memberships", { status: 201 });
+  mock.on("PATCH", "/rest/v1/invites", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send("POST", "/api/app/join-authed", { token: INVITE_TOKEN }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true, org_id: ORG_ID });
+
+  // No account creation on this path — the user already exists.
+  assert.equal(mock.requests.some((r) => r.url.includes("/auth/v1/admin/users")), false);
+
+  const membership = mock.requests.find(
+    (r) => r.method === "POST" && r.url.includes("/rest/v1/memberships")
+  );
+  assert.equal(membership.body.user_id, USER_ID);
+  assert.equal(membership.body.role, "manager");
+  assert.equal(membership.body.status, "active");
+
+  const invitePatch = mock.requests.find(
+    (r) => r.method === "PATCH" && r.url.includes("/rest/v1/invites")
+  );
+  assert.equal(invitePatch.body.accepted_by, USER_ID);
+
+  const audit = mock.requests.find((r) => r.method === "POST" && r.url.includes("audit_log"));
+  assert.equal(audit.body.action, "invite.accepted");
+  assert.deepEqual(audit.body.meta, { role: "manager" });
+});
+
+test("join-authed: an invite for another email is the same generic invite_invalid", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedInvite(mock); // invite targets new@pilot.test, the caller is owner@pilot.test
+  const res = await makeApi(mock).handle(
+    send("POST", "/api/app/join-authed", { token: INVITE_TOKEN }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 404);
+  assert.deepEqual(await res.json(), { error: "invite_invalid" });
+  assert.equal(mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/memberships")), false);
+});
+
+test("join-authed: a duplicate membership is 409 already_member and the invite survives", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedInvite(mock, { email: "owner@pilot.test" });
+  // PostgREST answers 409 on the (org_id, user_id) unique index.
+  mock.on("POST", "/rest/v1/memberships", {
+    status: 409,
+    body: { message: "duplicate key value violates unique constraint" }
+  });
+
+  const res = await makeApi(mock).handle(
+    send("POST", "/api/app/join-authed", { token: INVITE_TOKEN }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 409);
+  assert.deepEqual(await res.json(), { error: "already_member" });
+  assert.equal(
+    mock.requests.some((r) => r.method === "PATCH" && r.url.includes("/rest/v1/invites")),
+    false,
+    "a failed join must not burn the invite"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Onboarding: /register-org and POST /orgs (signup-code gated)
+// ---------------------------------------------------------------------------
+
+test("register-org: a wrong signup code is 403 and the real code never leaks", async () => {
+  const mock = createFetchMock();
+  const res = await makeApi(mock, ENV_SIGNUP).handle(
+    send("POST", "/api/app/register-org", {
+      signup_code: "wrong-guess",
+      org_name: "Pilot Co",
+      email: "boss@pilot.test",
+      password: "fake-reg-pass-1"
+    })
+  );
+  assert.equal(res.status, 403);
+  const body = await res.json();
+  assert.deepEqual(body, { error: "bad_signup_code" });
+  assert.equal(JSON.stringify(body).includes(SIGNUP_CODE), false, "expected code must never be echoed");
+  assert.equal(mock.requests.length, 0, "a rejected code makes no outbound calls");
+});
+
+test("register-org: without env SIGNUP_CODE signup is closed with 503", async () => {
+  const mock = createFetchMock();
+  const res = await makeApi(mock, ENV).handle(
+    send("POST", "/api/app/register-org", {
+      signup_code: "anything",
+      org_name: "Pilot Co",
+      email: "boss@pilot.test",
+      password: "fake-reg-pass-1"
+    })
+  );
+  assert.equal(res.status, 503);
+  assert.deepEqual(await res.json(), { error: "signup_closed" });
+  assert.equal(mock.requests.length, 0);
+});
+
+test("register-org happy path: account, org, owner, checklist and both integrations", async () => {
+  const mock = createFetchMock();
+  mock.on("POST", "/auth/v1/signup", {
+    status: 200,
+    body: { user: { id: NEW_USER_ID, identities: [{ id: "i-1" }] }, session: { access_token: "sess" } }
+  });
+  seedOrgCreation(mock);
+
+  const res = await makeApi(mock, ENV_SIGNUP).handle(
+    send("POST", "/api/app/register-org", {
+      signup_code: SIGNUP_CODE,
+      org_name: "ТОВ Ромашка!!",
+      email: "boss@pilot.test",
+      password: "fake-reg-pass-1",
+      full_name: "Директор"
+    })
+  );
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true, org_id: NEW_ORG_ID, email_confirmation_required: false });
+
+  // Self-serve signups go through the PUBLIC endpoint with the publishable
+  // key — the admin API would mint a CONFIRMED account for an unproven email.
+  const signup = mock.requests.find((r) => r.url.includes("/auth/v1/signup"));
+  assert.equal(signup.headers.apikey, PUBLISHABLE);
+  assert.deepEqual(signup.body.data, { full_name: "Директор" });
+  assert.equal(mock.requests.some((r) => r.url.includes("/auth/v1/admin/users")), false);
+
+  const org = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/organizations"));
+  assert.match(org.headers.prefer, /return=representation/);
+  assert.equal(org.body.name, "ТОВ Ромашка!!");
+  assert.equal(org.body.plan, "pilot");
+  assert.equal(org.body.monthly_call_quota, 500);
+  assert.equal(org.body.timezone, "Europe/Kyiv");
+  assert.equal(org.body.ai_provider, "gemini");
+  assert.equal(org.body.ai_key_source, "own");
+  assert.equal(org.body.created_by, NEW_USER_ID);
+  // Translit base + mandatory 6-hex suffix, valid against the DB check regex.
+  assert.match(org.body.slug, /^tov-romashka-[0-9a-f]{6}$/);
+  assert.match(org.body.slug, /^[a-z0-9-]+-[0-9a-f]{6}$/);
+  assert.match(org.body.slug, /^[a-z0-9][a-z0-9-]{1,48}$/);
+
+  const membership = mock.requests.find(
+    (r) => r.method === "POST" && r.url.includes("/rest/v1/memberships")
+  );
+  assert.equal(membership.body.org_id, NEW_ORG_ID);
+  assert.equal(membership.body.user_id, NEW_USER_ID);
+  assert.equal(membership.body.role, "owner");
+  assert.equal(membership.body.full_name, "Директор");
+  assert.equal(membership.body.status, "active");
+
+  const checklist = mock.requests.find(
+    (r) => r.method === "POST" && r.url.includes("/rest/v1/checklists")
+  );
+  assert.equal(checklist.body.name, "Базовый чек-лист");
+  assert.equal(checklist.body.is_default, true);
+  assert.equal(checklist.body.items.length, 7, "the 7 items from 0002_onboarding.sql");
+  assert.deepEqual(checklist.body.items.map((i) => i.key), [
+    "greeting", "needs", "qualification", "pitch", "objections", "next_step", "tone"
+  ]);
+  assert.equal(checklist.body.items.reduce((sum, i) => sum + i.weight, 0), 100);
+
+  const integrations = mock.requests.find(
+    (r) => r.method === "POST" && r.url.includes("/rest/v1/integrations")
+  );
+  assert.match(integrations.headers.prefer, /ignore-duplicates/);
+  assert.match(decodeURIComponent(integrations.url), /on_conflict=org_id,kind/);
+  assert.equal(integrations.body.length, 2);
+  assert.deepEqual(integrations.body.map((row) => row.kind).sort(), ["binotel", "ringostat"]);
+  for (const row of integrations.body) {
+    assert.equal(row.org_id, NEW_ORG_ID);
+    assert.equal(row.enabled, true);
+    // Explicit 24-byte token — the DB default only fires on an absent column.
+    assert.match(row.webhook_token, /^[0-9a-f]{48}$/);
+  }
+  assert.notEqual(integrations.body[0].webhook_token, integrations.body[1].webhook_token);
+
+  const audit = mock.requests.find((r) => r.method === "POST" && r.url.includes("audit_log"));
+  assert.equal(audit.body.action, "org.created");
+  assert.equal(audit.body.actor_id, NEW_USER_ID);
+  assert.equal(audit.body.target, NEW_ORG_ID);
+  assert.equal(audit.init.body.includes("fake-reg-pass-1"), false);
+});
+
+test("register-org: confirmations-on signup returns the confirmation flag", async () => {
+  const mock = createFetchMock();
+  // No session in the reply = the project requires email confirmation.
+  mock.on("POST", "/auth/v1/signup", {
+    status: 200,
+    body: { user: { id: NEW_USER_ID, identities: [{ id: "i-1" }] }, session: null }
+  });
+  seedOrgCreation(mock);
+  const res = await makeApi(mock, ENV_SIGNUP).handle(
+    send("POST", "/api/app/register-org", {
+      signup_code: SIGNUP_CODE, org_name: "Ромашка", email: "boss@pilot.test",
+      password: "fake-reg-pass-1", full_name: "Директор"
+    })
+  );
+  const body = await res.json();
+  assert.equal(res.status, 200);
+  assert.equal(body.email_confirmation_required, true);
+});
+
+test("register-org: an existing email is GoTrue's empty-identities reply, no org is created", async () => {
+  const mock = createFetchMock();
+  mock.on("POST", "/auth/v1/signup", {
+    status: 200,
+    body: { user: { id: "fake-obfuscated", identities: [] }, session: null }
+  });
+  const res = await makeApi(mock, ENV_SIGNUP).handle(
+    send("POST", "/api/app/register-org", {
+      signup_code: SIGNUP_CODE, org_name: "Ромашка", email: "taken@pilot.test",
+      password: "fake-reg-pass-1"
+    })
+  );
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error, "email_exists");
+  assert.equal(mock.requests.some((r) => r.url.includes("/rest/v1/organizations")), false);
+});
+
+test("register-org: a failed org bootstrap deletes the fresh account instead of squatting the email", async () => {
+  const mock = createFetchMock();
+  mock.on("POST", "/auth/v1/signup", {
+    status: 200,
+    body: { user: { id: NEW_USER_ID, identities: [{ id: "i-1" }] }, session: { access_token: "s" } }
+  });
+  // Org insert fails hard (not a slug 409) on every retry.
+  mock.on("POST", "/rest/v1/organizations", { status: 500, body: { message: "boom" } });
+  mock.on("DELETE", "/auth/v1/admin/users", { status: 200, body: {} });
+  const res = await makeApi(mock, ENV_SIGNUP).handle(
+    send("POST", "/api/app/register-org", {
+      signup_code: SIGNUP_CODE, org_name: "Ромашка", email: "boss@pilot.test",
+      password: "fake-reg-pass-1"
+    })
+  );
+  assert.equal(res.status, 502);
+  assert.equal((await res.json()).error, "org_create_failed");
+  const del = mock.requests.find((r) => r.method === "DELETE" && r.url.includes("/auth/v1/admin/users"));
+  assert.match(del.url, new RegExp(NEW_USER_ID));
+});
+
+test("createOrganization retries the slug on a unique violation", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  let orgPosts = 0;
+  mock.on("POST", "/rest/v1/organizations", (record) => {
+    orgPosts += 1;
+    return orgPosts === 1
+      ? { status: 409, body: { message: "duplicate key value violates unique constraint" } }
+      : { status: 201, body: [{ id: NEW_ORG_ID }] };
+  });
+  seedOrgCreation(mock);
+  const res = await makeApi(mock, ENV_SIGNUP).handle(
+    send("POST", "/api/app/orgs", { signup_code: SIGNUP_CODE, org_name: "Pilot Two" }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  assert.equal(orgPosts, 2, "second slug attempt after the collision");
+});
+
+test("orgs POST (authed): a signed-in user creates a company with the code", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedOrgCreation(mock);
+
+  const res = await makeApi(mock, ENV_SIGNUP).handle(
+    send("POST", "/api/app/orgs", { signup_code: SIGNUP_CODE, org_name: "Pilot Two" }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true, org_id: NEW_ORG_ID });
+
+  // The account already exists (e.g. Google): no admin user creation here.
+  assert.equal(mock.requests.some((r) => r.url.includes("/auth/v1/admin/users")), false);
+
+  const org = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/organizations"));
+  assert.equal(org.body.created_by, USER_ID);
+  assert.match(org.body.slug, /^pilot-two-[0-9a-f]{6}$/);
+
+  const membership = mock.requests.find(
+    (r) => r.method === "POST" && r.url.includes("/rest/v1/memberships")
+  );
+  assert.equal(membership.body.user_id, USER_ID);
+  assert.equal(membership.body.role, "owner");
+  assert.equal(membership.body.full_name, "Артур", "owner name comes from user_metadata");
 });

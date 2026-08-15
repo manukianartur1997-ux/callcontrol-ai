@@ -6,3 +6,9 @@ compatibility_date = "2026-05-12"
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+
+# Public (browser-visible by design) values the worker also needs. The
+# publishable key drives the anti-squatting PUBLIC signup path in
+# saas/worker/api.js registerOrg — only RLS-gated access, never privileged.
+[vars]
+SUPABASE_PUBLISHABLE_KEY = "sb_publishable_F4whCRaKdrKFBtv2kevG5A_tcM1k3iS"

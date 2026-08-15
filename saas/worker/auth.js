@@ -19,8 +19,8 @@ export function createTokenCache() {
   return new Map();
 }
 
-// -> { id, email } | null. Never throws: any failure (missing header, bad
-// token, auth service unreachable) reads as "not authenticated".
+// -> { id, email, user_metadata } | null. Never throws: any failure (missing
+// header, bad token, auth service unreachable) reads as "not authenticated".
 export async function getUser(request, env, fetchImpl, cache) {
   const header = request.headers.get("authorization") || "";
   const match = header.match(/^Bearer\s+(.+)$/i);
@@ -50,7 +50,13 @@ export async function getUser(request, env, fetchImpl, cache) {
   const data = await response.json().catch(() => null);
   if (!data?.id) return null;
 
-  const user = { id: data.id, email: data.email || null };
+  // user_metadata rides along for the cabinet (full_name / avatar set at
+  // signup or by the Google OAuth provider). Always an object, possibly empty.
+  const user = {
+    id: data.id,
+    email: data.email || null,
+    user_metadata: data.user_metadata && typeof data.user_metadata === "object" ? data.user_metadata : {}
+  };
   if (cache) {
     // Only successes are cached: a bad token re-hits auth every time, which
     // keeps "revoked a second ago" windows short and the logic simple.

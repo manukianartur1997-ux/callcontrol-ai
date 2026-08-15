@@ -11,9 +11,16 @@ import { copy } from "./copy.js";
 
 // JSON in / JSON out. Throws a plain { status, error } object on failure so
 // screens can map the error code to human text (see format.js humanApiError).
-export async function apiFetch(path, { method = "GET", body } = {}) {
-  const { data } = await supabase.auth.getSession();
-  const token = data?.session?.access_token || "";
+//
+// `auth: false` targets the no-auth endpoints (/join, /register-org): the
+// Authorization header is skipped entirely — there is no session yet, and a
+// stale one must not leak into a request that creates a fresh account.
+export async function apiFetch(path, { method = "GET", body, auth = true } = {}) {
+  let token = "";
+  if (auth) {
+    const { data } = await supabase.auth.getSession();
+    token = data?.session?.access_token || "";
+  }
   const headers = { accept: "application/json" };
   if (token) headers.authorization = `Bearer ${token}`;
   if (body !== undefined) headers["content-type"] = "application/json";
@@ -47,6 +54,27 @@ export async function apiFetch(path, { method = "GET", body } = {}) {
 // ---------------------------------------------------------------------------
 export function fetchMe() {
   return apiFetch("/me");
+}
+
+// Anonymous invite acceptance: creates the account AND the membership in one
+// Worker call; the caller signs in with the same credentials afterwards.
+export function joinWithInvite(body) {
+  return apiFetch("/join", { method: "POST", body, auth: false });
+}
+
+// Invite acceptance for an already-signed-in user (e.g. arrived via Google).
+export function joinAuthed(token) {
+  return apiFetch("/join-authed", { method: "POST", body: { token } });
+}
+
+// Anonymous pilot signup: account + organization, gated by SIGNUP_CODE.
+export function registerOrg(body) {
+  return apiFetch("/register-org", { method: "POST", body, auth: false });
+}
+
+// Organization creation for an existing signed-in user (same signup gate).
+export function createOrg(body) {
+  return apiFetch("/orgs", { method: "POST", body });
 }
 
 export function requestAnalyze(orgId, callId) {

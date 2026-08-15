@@ -412,4 +412,23 @@ for (const p of ["/edtech/ru/", "/edtech/uk/", "/edtech/en/"]) {
   assertIncludes("dist/sitemap.xml", `<loc>${SITE_ORIGIN}${p}</loc>`);
 }
 
+// CLIENT LOGIN ENTRY POINT: every generated landing page must link the
+// cabinet SPA at /app/ — a quiet topbar item right after the platform link
+// plus a footer link. The platform demo link itself stays untouched.
+for (const file of [
+  "dist/index.html",
+  "dist/ru/index.html", "dist/uk/index.html", "dist/en/index.html",
+  "dist/edtech/ru/index.html", "dist/edtech/uk/index.html", "dist/edtech/en/index.html"
+]) {
+  assertIncludes(file, 'href="/app/"');
+}
+// The label must be localized on every page (edtech inherits it via the
+// {...copy.<locale>} spread in the generator).
+assertIncludes("dist/ru/index.html", "Вход для клиентов");
+assertIncludes("dist/uk/index.html", "Вхід для клієнтів");
+assertIncludes("dist/en/index.html", "Client login");
+assertIncludes("dist/edtech/ru/index.html", "Вход для клиентов");
+assertIncludes("dist/edtech/uk/index.html", "Вхід для клієнтів");
+assertIncludes("dist/edtech/en/index.html", "Client login");
+
 console.log("Smoke check passed");

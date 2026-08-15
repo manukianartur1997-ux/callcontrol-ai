@@ -2,11 +2,12 @@
 //
 // Order of gates (each renders and stops):
 //   1. booting            -> centered spinner
-//   2. no session         -> Login
-//   3. /me loading        -> centered spinner
+//   2. no session         -> Login (invite mode + prefilled code on #/join/<t>)
+//   3. #/join/<token>     -> auto invite acceptance screen (JoinToken)
 //   4. /me failed         -> error screen with retry + sign out
-//   5. zero memberships   -> "no access" screen with sign out
-//   6. otherwise          -> Shell with the active org's screens
+//   5. /me loading        -> centered spinner
+//   6. zero memberships   -> NoAccess (invite-code / create-company cards)
+//   7. otherwise          -> Shell with the active org's screens
 import { useEffect, useState } from "react";
 import { supabase } from "./supabase.js";
 import { fetchMe, normalizeMe } from "./api.js";
@@ -19,11 +20,15 @@ import { Dashboard } from "./Dashboard.jsx";
 import { Calls } from "./Calls.jsx";
 import { CallDetail } from "./CallDetail.jsx";
 import { Settings } from "./Settings.jsx";
+import { Profile } from "./Profile.jsx";
+import { JoinToken } from "./Join.jsx";
+import { NoAccess } from "./NoAccess.jsx";
 import { NewCallModal } from "./NewCallModal.jsx";
 
 export function App() {
   const [booting, setBooting] = useState(true);
   const [session, setSession] = useState(null);
+  const route = useHashRoute();
 
   useEffect(() => {
     let mounted = true;
@@ -43,13 +48,26 @@ export function App() {
   }, []);
 
   if (booting) return <CenterSpinner />;
-  if (!session) return <Login />;
+  if (!session) {
+    // An invite link (#/join/<token>) without a session opens the login
+    // screen straight in invite mode with the code prefilled. The key remounts
+    // Login when the token appears/changes so the prefill actually lands.
+    const inviteToken = route.page === "join" && route.id ? route.id : null;
+    return (
+      <Login
+        key={inviteToken || "plain"}
+        initialMode={inviteToken ? "invite" : "signin"}
+        inviteToken={inviteToken}
+      />
+    );
+  }
   return <Authed session={session} />;
 }
 
 // Loads /api/app/me once per signed-in user; the Worker is the source of
 // truth for "which orgs does this user belong to".
 function Authed({ session }) {
+  const route = useHashRoute();
   const [me, setMe] = useState(null);
   const [error, setError] = useState(null);
   const [tick, setTick] = useState(0);
@@ -62,8 +80,9 @@ function Authed({ session }) {
       .then((raw) => {
         if (cancelled) return;
         setMe({
-          user: { id: session.user.id, email: session.user.email },
-          memberships: normalizeMe(raw)
+          memberships: normalizeMe(raw),
+          // /me echoes the auth user with user_metadata {full_name?, avatar?}
+          meta: (raw && raw.user && raw.user.user_metadata) || {}
         });
       })
       .catch((err) => {
@@ -74,7 +93,24 @@ function Authed({ session }) {
     };
   }, [session.user.id, tick]);
 
+  const reload = () => setTick((t) => t + 1);
   const signOut = () => supabase.auth.signOut();
+
+  // Invite link while signed in: accept it regardless of current memberships
+  // (an invited user may already belong to another org). Runs even while /me
+  // is still loading — joining does not need it.
+  if (route.page === "join" && route.id) {
+    return (
+      <JoinToken
+        token={route.id}
+        onJoined={() => {
+          reload();
+          navigate("/");
+        }}
+        onSignOut={signOut}
+      />
+    );
+  }
 
   if (error) {
     return (
@@ -85,7 +121,7 @@ function Authed({ session }) {
             <span className="brand-name brand-name-dark">{copy.common.appName}</span>
           </div>
           <h1 className="auth-title">{copy.errorScreen.title}</h1>
-          <ErrorBox error={error} onRetry={() => setTick((t) => t + 1)} />
+          <ErrorBox error={error} onRetry={reload} />
           <button type="button" className="btn btn-ghost btn-block" onClick={signOut}>
             {copy.common.signOut}
           </button>
@@ -97,24 +133,24 @@ function Authed({ session }) {
   if (!me) return <CenterSpinner />;
 
   if (me.memberships.length === 0) {
-    return (
-      <div className="auth-wrap">
-        <div className="auth-card">
-          <div className="auth-brand">
-            <BrandMark />
-            <span className="brand-name brand-name-dark">{copy.common.appName}</span>
-          </div>
-          <h1 className="auth-title">{copy.noAccess.title}</h1>
-          <p className="auth-subtitle">{copy.noAccess.text}</p>
-          <button type="button" className="btn btn-primary btn-block" onClick={signOut}>
-            {copy.common.signOut}
-          </button>
-        </div>
-      </div>
-    );
+    return <NoAccess onReload={reload} onSignOut={signOut} />;
   }
 
-  return <Workspace me={me} session={session} onSignOut={signOut} />;
+  // The live session copy of user_metadata wins: it refreshes immediately on
+  // updateUser (USER_UPDATED), while /me's copy is from fetch time.
+  const user = {
+    id: session.user.id,
+    email: session.user.email,
+    user_metadata: { ...me.meta, ...(session.user.user_metadata || {}) }
+  };
+
+  return (
+    <Workspace
+      me={{ user, memberships: me.memberships }}
+      session={session}
+      onSignOut={signOut}
+    />
+  );
 }
 
 function Workspace({ me, session, onSignOut }) {
@@ -129,6 +165,7 @@ function Workspace({ me, session, onSignOut }) {
   const known =
     route.page === "dashboard" ||
     route.page === "calls" ||
+    route.page === "profile" ||
     (route.page === "settings" && canSettings);
   useEffect(() => {
     if (!known) navigate("/");
@@ -150,6 +187,8 @@ function Workspace({ me, session, onSignOut }) {
     content = <Calls org={active} onNewCall={openNewCall} />;
   } else if (route.page === "settings") {
     content = <Settings org={active} />;
+  } else if (route.page === "profile") {
+    content = <Profile session={session} />;
   } else {
     content = <Dashboard org={active} onNewCall={openNewCall} />;
   }

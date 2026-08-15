@@ -29,6 +29,138 @@ const ROLES = new Set(["owner", "admin", "lead", "manager", "viewer"]);
 const ADMIN_GRANTABLE = new Set(["lead", "manager", "viewer"]);
 const TELEPHONY_KINDS = new Set(["ringostat", "binotel"]);
 
+// Invite tokens are DB-generated hex (48 chars by default); accepting 16..64
+// hex keeps room for other lengths while a malformed token can short-circuit
+// to the same generic invite_invalid without ever touching the DB.
+// Exactly what the invites.token DB default generates: 48 lowercase hex
+// (192 bits). A wider window would silently accept tokens that can never
+// match a stored one and widen a future misconfiguration.
+const INVITE_TOKEN_RE = /^[a-f0-9]{48}$/;
+
+// Verbatim copy of app.default_checklist_items() from
+// saas/migrations/0002_onboarding.sql. Schema "app" is not exposed through
+// PostgREST, so the Worker seeds the same 7 items itself during onboarding.
+const DEFAULT_CHECKLIST_ITEMS = [
+  { key: "greeting", weight: 8, label: "Приветствие и представление", hint: "Назвал компанию и себя, обозначил цель звонка" },
+  { key: "needs", weight: 20, label: "Выявление потребности", hint: "Открытые вопросы, докопался до реальной задачи, а не до запроса" },
+  { key: "qualification", weight: 14, label: "Квалификация", hint: "Бюджет, сроки, кто принимает решение" },
+  { key: "pitch", weight: 14, label: "Презентация под потребность", hint: "Говорил о выгоде клиента, а не о свойствах продукта" },
+  { key: "objections", weight: 16, label: "Работа с возражениями", hint: "Уточнил суть возражения, не спорил, привёл аргумент" },
+  { key: "next_step", weight: 18, label: "Фиксация следующего шага", hint: "Конкретная дата и договорённость, а не «я перезвоню»" },
+  { key: "tone", weight: 10, label: "Тон и инициатива", hint: "Вёл разговор, не перебивал, слушал" }
+];
+
+// Minimal uk/ru transliteration so a Cyrillic company name still yields a
+// readable slug; anything unmapped is stripped by the [a-z0-9] filter below.
+const SLUG_TRANSLIT = {
+  а: "a", б: "b", в: "v", г: "h", ґ: "g", д: "d", е: "e", є: "ie", ё: "e",
+  ж: "zh", з: "z", и: "y", і: "i", ї: "i", й: "i", к: "k", л: "l", м: "m",
+  н: "n", о: "o", п: "p", р: "r", с: "s", т: "t", у: "u", ф: "f", х: "kh",
+  ц: "ts", ч: "ch", ш: "sh", щ: "shch", ъ: "", ы: "y", ь: "", э: "e",
+  ю: "iu", я: "ia"
+};
+
+function randomHex(bytes) {
+  const buf = crypto.getRandomValues(new Uint8Array(bytes));
+  return Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Lowercase translit of the name reduced to [a-z0-9-], dashes collapsed,
+// trimmed to 24 chars. Never empty and never starts/ends with a dash, so the
+// final "<base>-<hex>" always satisfies the DB check ^[a-z0-9][a-z0-9-]{1,48}$.
+function slugBase(name) {
+  const base = String(name)
+    .toLowerCase()
+    .split("")
+    .map((ch) => SLUG_TRANSLIT[ch] ?? ch)
+    .join("")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 24)
+    .replace(/-$/, "");
+  return base || "org";
+}
+
+// Bootstrap for a fresh organization: org row, owner membership, default
+// checklist, both telephony integrations, audit entry. Reimplements
+// app.create_organization() from 0002_onboarding.sql with plain table writes
+// because schema "app" is not exposed via PostgREST.
+//
+// NOTE: org creation is intentionally NOT rate-limited beyond the signup code
+// (or a valid invite) — the pilot is invite-only, and that gate is accepted
+// as sufficient for now.
+async function createOrganization(env, fetchImpl, { name, ownerId, ownerName }) {
+  // The 6-hex suffix is ALWAYS appended, so slug uniqueness never depends on
+  // the human-chosen name; 24 random bits can still collide, so a unique
+  // violation retries with fresh randomness instead of failing the signup.
+  let orgId = null;
+  for (let attempt = 0; attempt < 3 && !orgId; attempt += 1) {
+    const slug = `${slugBase(name)}-${randomHex(3)}`;
+    try {
+      const created = await sbPost(env, fetchImpl, "organizations", {
+        headers: { prefer: "return=representation" },
+        body: {
+          name,
+          slug,
+          plan: "pilot",
+          monthly_call_quota: 500,
+          timezone: "Europe/Kyiv",
+          ai_provider: "gemini",
+          ai_key_source: "own",
+          created_by: ownerId
+        }
+      });
+      orgId = created?.[0]?.id || null;
+    } catch (error) {
+      if (!/_409|duplicate/i.test(String(error?.message))) throw error;
+    }
+  }
+  if (!orgId) throw new Error("org_create_failed");
+
+  try {
+    await seedOrganization(env, fetchImpl, { orgId, ownerId, ownerName });
+  } catch (error) {
+    // A failure between the org insert and the owner membership would leave
+    // an org nobody can enter; delete the shell (FKs cascade) and rethrow so
+    // the caller can clean up its side too.
+    await sbRequestDelete(env, fetchImpl, `organizations?${sbEq({ id: orgId })}`).catch(() => {});
+    throw error;
+  }
+  return orgId;
+}
+
+async function sbRequestDelete(env, fetchImpl, path) {
+  const response = await fetchImpl(`${env.SUPABASE_URL}/rest/v1/${path}`, {
+    method: "DELETE",
+    headers: { apikey: env.SUPABASE_SECRET_KEY, authorization: `Bearer ${env.SUPABASE_SECRET_KEY}` }
+  });
+  if (!response.ok) throw new Error(`supabase_delete_${response.status}`);
+}
+
+async function seedOrganization(env, fetchImpl, { orgId, ownerId, ownerName }) {
+  await sbPost(env, fetchImpl, "memberships", {
+    body: { org_id: orgId, user_id: ownerId, role: "owner", full_name: ownerName || null, status: "active" }
+  });
+  await sbPost(env, fetchImpl, "checklists", {
+    body: { org_id: orgId, name: "Базовый чек-лист", items: DEFAULT_CHECKLIST_ITEMS, is_default: true }
+  });
+  // webhook_token is set explicitly: the DB default only fires when the
+  // column is absent from the insert payload, and this insert names it.
+  await sbPost(env, fetchImpl, `integrations?${new URLSearchParams({ on_conflict: "org_id,kind" })}`, {
+    headers: { prefer: "resolution=ignore-duplicates" },
+    body: [...TELEPHONY_KINDS].map((kind) => ({
+      org_id: orgId,
+      kind,
+      enabled: true,
+      webhook_token: randomHex(24)
+    }))
+  });
+  await sbPost(env, fetchImpl, "audit_log", {
+    body: { org_id: orgId, actor_id: ownerId, action: "org.created", target: orgId }
+  });
+}
+
 function json(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -394,7 +526,7 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     const body = await request.json().catch(() => null);
     const email = String(body?.email || "").trim();
     const password = typeof body?.password === "string" ? body.password : "";
-    const fullName = String(body?.full_name || "").trim();
+    const fullName = String(body?.full_name || "").trim().slice(0, 120);
     const role = String(body?.role || "");
     const extension = body?.extension ? String(body.extension) : null;
     const departmentId = body?.department_id ? String(body.department_id) : null;
@@ -474,6 +606,254 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
       webhook_path: `/api/telephony/${row.kind}/${row.webhook_token}`,
       last_event_at: row.last_event_at
     })));
+  }
+
+  // --- onboarding: invites & self-serve org creation -----------------------
+
+  // ONE generic null for every invalid-invite reason (malformed token,
+  // missing row, already used, expired, email mismatch): the token holder
+  // must not learn which check failed — a leaked link yields no oracle about
+  // whose invite it was or whether it was ever valid.
+  async function loadValidInvite(token, email) {
+    if (!INVITE_TOKEN_RE.test(token)) return null;
+    const invite = (await sbGet(env, fetchImpl, `invites?${sbEq(
+      { token },
+      { select: "id,org_id,email,role,department_id,invited_by,expires_at,accepted_at", limit: "1" }
+    )}`))?.[0];
+    if (!invite) return null;
+    if (invite.accepted_at) return null;
+    if (!invite.expires_at || new Date(invite.expires_at).getTime() <= Date.now()) return null;
+    if (String(invite.email || "").toLowerCase() !== String(email || "").toLowerCase()) return null;
+    return invite;
+  }
+
+  // Burn the invite and leave the audit trail; called only AFTER the
+  // membership row landed, so a failed insert leaves the invite spendable.
+  async function markInviteAccepted(invite, userId) {
+    await sbPatch(env, fetchImpl, `invites?${sbEq({ id: invite.id })}`, {
+      body: { accepted_at: new Date().toISOString(), accepted_by: userId }
+    });
+    await sbPost(env, fetchImpl, "audit_log", {
+      body: {
+        org_id: invite.org_id,
+        actor_id: userId,
+        action: "invite.accepted",
+        target: invite.id,
+        meta: { role: invite.role }
+      }
+    });
+  }
+
+  // Supabase Auth admin endpoint — service key as both apikey and bearer.
+  // 422 (GoTrue) and 409 both mean "this email already has an account".
+  async function createAuthUser(email, password, fullName) {
+    const response = await fetchImpl(`${env.SUPABASE_URL}/auth/v1/admin/users`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        apikey: env.SUPABASE_SECRET_KEY,
+        authorization: `Bearer ${env.SUPABASE_SECRET_KEY}`
+      },
+      body: JSON.stringify({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: fullName ? { full_name: fullName } : {}
+      })
+    });
+    if (response.status === 422 || response.status === 409) return { exists: true };
+    if (!response.ok) return { error: true };
+    const created = await response.json().catch(() => null);
+    const userId = created?.id || created?.user?.id;
+    if (!userId) return { error: true };
+    return { userId };
+  }
+
+  // Public: invite token + email + fresh password -> account + membership.
+  async function join(request) {
+    const body = await request.json().catch(() => null);
+    const token = String(body?.token || "");
+    const email = String(body?.email || "").trim();
+    const password = typeof body?.password === "string" ? body.password : "";
+    const fullName = String(body?.full_name || "").trim().slice(0, 120);
+
+    if (password.length < 8) return json({ error: "weak_password" }, 400);
+    if (!email.includes("@")) return json({ error: "bad_email" }, 400);
+
+    const invite = await loadValidInvite(token, email);
+    if (!invite) return json({ error: "invite_invalid" }, 404);
+
+    const auth = await createAuthUser(email, password, fullName);
+    // The invitee already has an account (e.g. signed up via Google): they
+    // must sign in and use /join-authed — the invite stays unspent.
+    if (auth.exists) return json({ error: "email_exists", hint: "sign_in_then_join" }, 409);
+    if (!auth.userId) return json({ error: "auth_create_failed" }, 502);
+
+    await sbPost(env, fetchImpl, "memberships", {
+      body: {
+        org_id: invite.org_id,
+        user_id: auth.userId,
+        role: invite.role,
+        department_id: invite.department_id || null,
+        full_name: fullName || null,
+        status: "active",
+        invited_by: invite.invited_by
+      }
+    });
+    await markInviteAccepted(invite, auth.userId);
+    return json({ ok: true });
+  }
+
+  // Authed: the invite must target the signed-in account's OWN email, so a
+  // forwarded link is useless to anyone but the invitee.
+  async function joinAuthed(request, user) {
+    const body = await request.json().catch(() => null);
+    const token = String(body?.token || "");
+
+    const invite = await loadValidInvite(token, user.email);
+    if (!invite) return json({ error: "invite_invalid" }, 404);
+
+    try {
+      await sbPost(env, fetchImpl, "memberships", {
+        body: {
+          org_id: invite.org_id,
+          user_id: user.id,
+          role: invite.role,
+          department_id: invite.department_id || null,
+          full_name: user.user_metadata?.full_name || null,
+          status: "active",
+          invited_by: invite.invited_by
+        }
+      });
+    } catch (error) {
+      // The (org_id, user_id) unique index answered 409 — already a member;
+      // the invite is left untouched.
+      if (/supabase_post_409/.test(String(error?.message || ""))) {
+        return json({ error: "already_member" }, 409);
+      }
+      throw error;
+    }
+    await markInviteAccepted(invite, user.id);
+    return json({ ok: true, org_id: invite.org_id });
+  }
+
+  // Signup gate: SIGNUP_CODE is a shared secret handed out per pilot deal.
+  // A wrong code answers 403 with a bare error label — neither the expected
+  // code nor the attempted value ever appears in a response or a log.
+  // Compared via SHA-256 digests so the comparison time is independent of how
+  // many leading characters matched (plain !== short-circuits per byte).
+  async function signupGate(body) {
+    if (!env.SIGNUP_CODE) return json({ error: "signup_closed" }, 503);
+    const enc = new TextEncoder();
+    const [a, b] = await Promise.all([
+      crypto.subtle.digest("SHA-256", enc.encode(String(body?.signup_code || ""))),
+      crypto.subtle.digest("SHA-256", enc.encode(String(env.SIGNUP_CODE)))
+    ]);
+    const av = new Uint8Array(a);
+    const bv = new Uint8Array(b);
+    let diff = 0;
+    for (let i = 0; i < av.length; i += 1) diff |= av[i] ^ bv[i];
+    if (diff !== 0) return json({ error: "bad_signup_code" }, 403);
+    return null;
+  }
+
+  // Public: signup code + fresh account -> new organization, caller is owner.
+  async function registerOrg(request) {
+    const body = await request.json().catch(() => null);
+    const gate = await signupGate(body);
+    if (gate) return gate;
+
+    const orgName = String(body?.org_name || "").trim();
+    const email = String(body?.email || "").trim();
+    const password = typeof body?.password === "string" ? body.password : "";
+    const fullName = String(body?.full_name || "").trim().slice(0, 120);
+
+    if (orgName.length < 2 || orgName.length > 120) return json({ error: "bad_org_name" }, 400);
+    if (password.length < 8) return json({ error: "weak_password" }, 400);
+    if (!email.includes("@")) return json({ error: "bad_email" }, 400);
+
+    // Self-serve accounts go through the PUBLIC signup endpoint, NOT the
+    // admin API: the admin path would mint a CONFIRMED account for an email
+    // the caller never proved they own (pre-registration squatting). Public
+    // signup respects the project's email-confirmation setting, and Supabase
+    // sends the confirmation mail itself.
+    const signup = await fetchImpl(`${env.SUPABASE_URL}/auth/v1/signup`, {
+      method: "POST",
+      headers: { "content-type": "application/json", apikey: env.SUPABASE_PUBLISHABLE_KEY },
+      body: JSON.stringify({
+        email,
+        password,
+        data: fullName ? { full_name: fullName.slice(0, 120) } : {}
+      })
+    });
+    const created = await signup.json().catch(() => null);
+    if (!signup.ok) {
+      if (signup.status === 400 || signup.status === 422) {
+        logAbuseSignal("register_org_email_rejected", email);
+        return json({ error: "email_exists", hint: "sign_in_then_create" }, 409);
+      }
+      return json({ error: "auth_create_failed" }, 502);
+    }
+    const authUser = created?.user || created;
+    // GoTrue anti-enumeration: an already-registered email yields a fake
+    // user with an EMPTY identities array. Surfacing 409 here is equivalent
+    // to what Supabase's own public endpoint reveals — logged for velocity.
+    if (Array.isArray(authUser?.identities) && authUser.identities.length === 0) {
+      logAbuseSignal("register_org_email_exists", email);
+      return json({ error: "email_exists", hint: "sign_in_then_create" }, 409);
+    }
+    if (!authUser?.id) return json({ error: "auth_create_failed" }, 502);
+
+    let orgId;
+    try {
+      orgId = await createOrganization(env, fetchImpl, {
+        name: orgName,
+        ownerId: authUser.id,
+        ownerName: fullName ? fullName.slice(0, 120) : null
+      });
+    } catch (error) {
+      // Never leave an orphaned account squatting the email: without this,
+      // a failed org bootstrap permanently blocks the user's next attempt
+      // with email_exists.
+      await fetchImpl(`${env.SUPABASE_URL}/auth/v1/admin/users/${authUser.id}`, {
+        method: "DELETE",
+        headers: { apikey: env.SUPABASE_SECRET_KEY, authorization: `Bearer ${env.SUPABASE_SECRET_KEY}` }
+      }).catch(() => {});
+      return json({ error: "org_create_failed" }, 502);
+    }
+    return json({
+      ok: true,
+      org_id: orgId,
+      // No session in the signup answer => confirmations are on and the user
+      // must click the emailed link before password sign-in works.
+      email_confirmation_required: !created?.session && !created?.access_token
+    });
+  }
+
+  // Enumeration attempts against the public registration surface cannot land
+  // in audit_log (org_id is NOT NULL there and no tenant exists yet), so they
+  // go to the worker log where a velocity burst is visible via wrangler tail.
+  function logAbuseSignal(kind, email) {
+    const at = String(email).indexOf("@");
+    const masked = at > 0 ? `${String(email).slice(0, 2)}…${String(email).slice(at)}` : "…";
+    console.warn(`[abuse-signal] ${kind} ${masked}`);
+  }
+
+  // Authed (the Google-signup path: account exists, wants a company).
+  async function createOrgAuthed(request, user) {
+    const body = await request.json().catch(() => null);
+    const gate = await signupGate(body);
+    if (gate) return gate;
+
+    const orgName = String(body?.org_name || "").trim();
+    if (orgName.length < 2 || orgName.length > 120) return json({ error: "bad_org_name" }, 400);
+
+    const orgId = await createOrganization(env, fetchImpl, {
+      name: orgName,
+      ownerId: user.id,
+      ownerName: (user.user_metadata?.full_name || "").slice(0, 120) || null
+    });
+    return json({ ok: true, org_id: orgId });
   }
 
   // --- telephony webhooks --------------------------------------------------
@@ -573,10 +953,20 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
   // --- dispatch ------------------------------------------------------------
 
   async function handleApp(request, path) {
+    const method = request.method;
+
+    // Public onboarding endpoints — the caller has no session yet by
+    // definition, so these dispatch BEFORE the bearer check. Each one gates
+    // itself instead: a valid invite token or the signup code.
+    if (path === "/api/app/join" && method === "POST") return join(request);
+    if (path === "/api/app/register-org" && method === "POST") return registerOrg(request);
+
     const user = await getUser(request, env, fetchImpl, tokenCache);
     if (!user) return json({ error: "unauthorized" }, 401);
 
-    if (path === "/api/app/me" && request.method === "GET") return me(user);
+    if (path === "/api/app/me" && method === "GET") return me(user);
+    if (path === "/api/app/join-authed" && method === "POST") return joinAuthed(request, user);
+    if (path === "/api/app/orgs" && method === "POST") return createOrgAuthed(request, user);
 
     const orgMatch = path.match(/^\/api\/app\/orgs\/([^/]+)\/(.+)$/);
     if (!orgMatch) return json({ error: "not_found" }, 404);
@@ -590,7 +980,6 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     const membership = await activeMembership(orgId, user.id);
     if (!membership) return json({ error: "not_a_member" }, 403);
 
-    const method = request.method;
     if (rest === "analyze" && method === "POST") return analyze(request, orgId, user, membership);
     if (rest === "ai-key" && method === "GET") return getAiKey(orgId, membership);
     if (rest === "ai-key" && method === "PUT") return putAiKey(request, orgId, user, membership);

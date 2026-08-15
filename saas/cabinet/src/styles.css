@@ -188,6 +188,30 @@ a {
   gap: 4px;
 }
 
+/* The whole user block is one link into #/profile. */
+.side-user-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 8px;
+  padding: 6px;
+  margin: -6px -6px 2px;
+  transition: background 0.12s ease;
+}
+
+.side-user-link:hover,
+.side-user-link.active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.side-user-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .user-name {
   font-weight: 600;
   color: #fff;
@@ -245,6 +269,97 @@ a {
 .auth-subtitle {
   color: var(--muted);
   font-size: 14px;
+}
+
+.auth-card-wide {
+  max-width: 460px;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Mode switcher on the login card: signin / invite / register. */
+.auth-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.auth-tab {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 6px 4px;
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.auth-tab:hover:not(.active) {
+  color: var(--ink);
+}
+
+.auth-tab.active {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: var(--card-shadow);
+}
+
+/* "or" separator between password sign-in and Google. */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+/* Signed-in invite acceptance (#/join/<token>) progress row. */
+.join-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  padding: 8px 0;
+}
+
+/* "No access" self-serve cards: invite code / create company. */
+.access-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.access-card .btn {
+  align-self: flex-start;
+}
+
+.access-card-title {
+  font-size: 15px;
+  font-weight: 700;
 }
 
 /* ---------------------------------------------------------------- cards */
@@ -1238,6 +1353,63 @@ a {
   overflow-x: auto;
   white-space: nowrap;
   font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- avatar */
+
+.avatar {
+  border-radius: 50%;
+  flex-shrink: 0;
+  object-fit: cover;
+  display: inline-block;
+}
+
+.avatar-initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #38bdf8, #4f46e5);
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+/* ---------------------------------------------------------------- profile */
+
+.page-narrow {
+  max-width: 640px;
+}
+
+.profile-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 420px;
+}
+
+.profile-note {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.profile-avatar-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.profile-avatar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* <label> styled as a button (file input) cannot use :disabled. */
+.btn-disabled {
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 /* ---------------------------------------------------------------- responsive */
