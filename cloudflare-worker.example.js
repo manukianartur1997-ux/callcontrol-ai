@@ -11,9 +11,21 @@ import {
   checkKvRateLimit,
   corsHeadersFor
 } from "./lib/lead.js";
+import { createApi } from "./saas/worker/api.js";
+
+// SaaS cabinet + telephony webhooks (saas/worker/api.js). Created lazily on
+// the first request and kept for the isolate's lifetime so its auth token
+// cache survives between requests. handle() returns null for every route it
+// does not own (including OPTIONS preflights), so all pre-existing routes
+// below keep working unchanged.
+let saasApi = null;
 
 export default {
   async fetch(request, env) {
+    saasApi = saasApi || createApi({ env });
+    const saasResponse = await saasApi.handle(request);
+    if (saasResponse) return saasResponse;
+
     const url = new URL(request.url);
     const cors = corsHeadersFor(request, env);
 

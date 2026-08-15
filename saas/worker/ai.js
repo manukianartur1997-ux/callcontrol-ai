@@ -129,9 +129,10 @@ ${transcript}
 
 const DEFAULT_MODELS = {
   anthropic: "claude-opus-5",
-  // Verify the current id in Google AI Studio before pointing a client at it —
-  // Google's catalog moves faster than this file does.
-  gemini: "gemini-2.5-flash",
+  // A rolling alias: always points at the current stable Gemini Flash.
+  // Pinned version ids (gemini-2.5-flash etc.) 404 for keys created after that
+  // version was superseded, even though they still appear in the models list.
+  gemini: "gemini-flash-latest",
   openai: "gpt-5"
 };
 
