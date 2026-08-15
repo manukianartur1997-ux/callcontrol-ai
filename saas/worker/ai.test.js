@@ -9,7 +9,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { analyzeCall, defaultModelFor, supportedProviders, __testing } from "./ai.js";
+import { analyzeCall, transcribeAudio, defaultModelFor, supportedProviders, __testing } from "./ai.js";
 
 const CHECKLIST = {
   items: [
@@ -215,6 +215,145 @@ test("guard rails: unknown provider, missing key, stub transcript", async () => 
     analyzeCall({ provider: "anthropic", apiKey: "k", transcript: "алло", checklist: CHECKLIST }),
     /transcript_too_short/
   );
+});
+
+test("lead_quality: in the schema, in the prompt rubric, defaulted in normalize", () => {
+  // The schema requires the field and constrains it to the three values.
+  assert.ok(__testing.ANALYSIS_SCHEMA.required.includes("lead_quality"));
+  assert.deepEqual(__testing.ANALYSIS_SCHEMA.properties.lead_quality.enum, [
+    "good", "bad", "unclear"
+  ]);
+  // The model gets an actual rubric, not just a field name.
+  assert.match(__testing.SYSTEM_PROMPT, /lead_quality/);
+  assert.match(__testing.SYSTEM_PROMPT, /целевой/);
+
+  // Missing or garbage values collapse to 'unclear'; valid ones pass through.
+  const base = { items: [], leaks: [], coaching: [] };
+  assert.equal(__testing.normalizeAnalysis(base, { items: [] }).lead_quality, "unclear");
+  assert.equal(
+    __testing.normalizeAnalysis({ ...base, lead_quality: "excellent" }, { items: [] }).lead_quality,
+    "unclear"
+  );
+  assert.equal(
+    __testing.normalizeAnalysis({ ...base, lead_quality: "good" }, { items: [] }).lead_quality,
+    "good"
+  );
+  assert.equal(
+    __testing.normalizeAnalysis({ ...base, lead_quality: "bad" }, { items: [] }).lead_quality,
+    "bad"
+  );
+});
+
+test("analyzeCall carries lead_quality through to the result", async () => {
+  const { fetchImpl } = stubFetch((text) => ({
+    stop_reason: "end_turn",
+    content: [{ type: "text", text }],
+    usage: { input_tokens: 1, output_tokens: 1 }
+  }));
+  // The canned ANALYSIS fixture has no lead_quality — the default applies.
+  const result = await analyzeCall({
+    provider: "anthropic",
+    apiKey: "k",
+    transcript: TRANSCRIPT,
+    checklist: CHECKLIST,
+    fetchImpl
+  });
+  assert.equal(result.lead_quality, "unclear");
+});
+
+// ---------------------------------------------------------------------------
+// STT: transcribeAudio (Gemini inline audio)
+// ---------------------------------------------------------------------------
+
+const DIARIZED = "Менеджер: Добрый день, это Пётр.\nКлиент: Здравствуйте, расскажите про тарифы.";
+
+function sttEnvelope(payload, usage = { promptTokenCount: 4800, candidatesTokenCount: 260 }) {
+  return {
+    candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify(payload) }] } }],
+    usageMetadata: usage
+  };
+}
+
+test("transcribeAudio: inline audio request shape, diarization prompt, result mapping", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init, body: JSON.parse(init.body) });
+    return { ok: true, status: 200, json: async () => sttEnvelope({ lang: "RU", text: DIARIZED }) };
+  };
+
+  const result = await transcribeAudio({
+    provider: "gemini",
+    apiKey: "AIza-stt-test",
+    audioB64: "QUJD",
+    mime: "audio/mpeg",
+    fetchImpl
+  });
+
+  const [call] = calls;
+  assert.match(call.url, /generativelanguage\.googleapis\.com/);
+  assert.match(call.url, /gemini-flash-latest/, "default model when none is chosen");
+  assert.equal(call.init.headers["x-goog-api-key"], "AIza-stt-test");
+
+  const parts = call.body.contents[0].parts;
+  const audioPart = parts.find((part) => part.inlineData);
+  assert.equal(audioPart.inlineData.mimeType, "audio/mpeg");
+  assert.equal(audioPart.inlineData.data, "QUJD");
+  const promptPart = parts.find((part) => part.text);
+  // The strict per-utterance diarization format is spelled out in the prompt.
+  assert.match(promptPart.text, /Менеджер: …/);
+  assert.match(promptPart.text, /Клиент: …/);
+  assert.match(promptPart.text, /на языке оригинала/);
+  assert.equal(call.body.generationConfig.responseMimeType, "application/json");
+
+  assert.equal(result.text, DIARIZED);
+  assert.equal(result.lang, "ru", "lang is lowercased");
+  assert.equal(result.tokensIn, 4800);
+  assert.equal(result.tokensOut, 260);
+});
+
+test("transcribeAudio: an explicit model overrides the default", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url });
+    return { ok: true, status: 200, json: async () => sttEnvelope({ lang: "uk", text: DIARIZED }) };
+  };
+  await transcribeAudio({
+    apiKey: "k", model: "gemini-pro-latest", audioB64: "QUJD", mime: "audio/wav", fetchImpl
+  });
+  assert.match(calls[0].url, /gemini-pro-latest/);
+});
+
+test("transcribeAudio errors follow the driver conventions", async () => {
+  const args = { apiKey: "k", audioB64: "QUJD", mime: "audio/mpeg" };
+
+  await assert.rejects(
+    transcribeAudio({ ...args, fetchImpl: async () => ({ ok: false, status: 429, text: async () => "quota" }) }),
+    /gemini_http_429/
+  );
+  await assert.rejects(
+    transcribeAudio({
+      ...args,
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ candidates: [{ finishReason: "MAX_TOKENS", content: { parts: [{ text: "x" }] } }] }) })
+    }),
+    /gemini_truncated/
+  );
+  await assert.rejects(
+    transcribeAudio({
+      ...args,
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: "not json at all" }] } }] }) })
+    }),
+    /transcription_not_json/
+  );
+  await assert.rejects(
+    transcribeAudio({
+      ...args,
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => sttEnvelope({ lang: "ru", text: "  " }) })
+    }),
+    /transcription_empty/
+  );
+  await assert.rejects(transcribeAudio({ ...args, provider: "whisper" }), /unsupported_stt_provider_whisper/);
+  await assert.rejects(transcribeAudio({ apiKey: "", audioB64: "QUJD", mime: "audio/mpeg" }), /api_key_missing/);
+  await assert.rejects(transcribeAudio({ apiKey: "k", audioB64: "", mime: "audio/mpeg" }), /audio_missing/);
 });
 
 test("checklist weights and hints reach the prompt", () => {

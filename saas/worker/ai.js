@@ -20,6 +20,7 @@
 // {
 //   score: 0-100,
 //   summary: string,
+//   lead_quality: "good" | "bad" | "unclear",         // маркетинг: целевой ли лид
 //   items:    [{ key, score, evidence, comment }],   // one per checklist item
 //   leaks:    [{ title, severity, detail, money_impact }],
 //   coaching: [{ title, detail }],
@@ -27,13 +28,20 @@
 //   provider, model, tokensIn, tokensOut
 // }
 
+const LEAD_QUALITIES = ["good", "bad", "unclear"];
+
 const ANALYSIS_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["score", "summary", "items", "leaks", "coaching", "next_step"],
+  required: ["score", "summary", "lead_quality", "items", "leaks", "coaching", "next_step"],
   properties: {
     score: { type: "integer", description: "Итоговый балл звонка, 0-100" },
     summary: { type: "string", description: "2-3 предложения: что произошло на звонке" },
+    lead_quality: {
+      type: "string",
+      enum: LEAD_QUALITIES,
+      description: "Маркетинговая оценка лида: целевой ли лид пришёл на звонок"
+    },
     items: {
       type: "array",
       description: "По одному объекту на каждый пункт чек-листа, в том же порядке",
@@ -96,6 +104,10 @@ const SYSTEM_PROMPT = `Ты — руководитель отдела прода
 тексте нет — пустая строка, а не пересказ.
 
 Итоговый score — взвешенная сумма пунктов по их весам, а не среднее.
+
+lead_quality — оценка ЛИДА, не менеджера: good — целевой клиент с реальной
+потребностью в продукте, bad — спам/нецелевой/ошибся номером, unclear — по
+разговору не понять.
 
 Пиши на языке транскрипта. Формулировки — как для живого РОПа: коротко,
 конкретно, без обтекаемых советов вроде «улучшить коммуникацию».`;
@@ -273,6 +285,105 @@ async function runOpenAI({ apiKey, model, system, user, fetchImpl }) {
 const DRIVERS = { anthropic: runAnthropic, gemini: runGemini, openai: runOpenAI };
 
 // ---------------------------------------------------------------------------
+// Speech-to-text (Gemini only)
+// ---------------------------------------------------------------------------
+
+// Transcripts are much longer than analyses; a 30-minute call fits well under
+// this, and Gemini Flash allows far more output than the analysis path needs.
+const STT_MAX_OUTPUT_TOKENS = 32_000;
+
+// JSON output so the language comes back reliably instead of being guessed
+// from the characters; `text` still carries the strict dialog format below.
+const TRANSCRIBE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["lang", "text"],
+  properties: {
+    lang: { type: "string", description: "Язык разговора кодом ISO 639-1: ru, uk, en…" },
+    text: {
+      type: "string",
+      description: "Транскрипт целиком: по одной реплике на строку, «Менеджер: …» или «Клиент: …»"
+    }
+  }
+};
+
+const TRANSCRIBE_PROMPT = `Расшифруй запись телефонного разговора менеджера по продажам с клиентом.
+
+Правила — строго:
+- Дословно, на языке оригинала, без перевода и без пересказа.
+- Диаризация: каждая реплика с новой строки, строго в формате
+«Менеджер: …» или «Клиент: …» — никаких других префиксов и ролей.
+- Менеджер — сотрудник компании; клиент — вторая сторона разговора.
+- Никаких комментариев, таймкодов и заголовков — только реплики.
+В lang верни код языка разговора (ISO 639-1).`;
+
+// STT via Gemini generateContent with an inline audio part. Same error
+// conventions as the analysis drivers: gemini_http_*, gemini_truncated,
+// gemini_empty_response. The caller (api.js) owns persistence and quota.
+export async function transcribeAudio({
+  provider = "gemini",
+  apiKey,
+  model,
+  audioB64,
+  mime,
+  fetchImpl = fetch
+}) {
+  if (provider !== "gemini") throw new Error(`unsupported_stt_provider_${provider}`);
+  if (!apiKey) throw new Error("api_key_missing");
+  if (!audioB64) throw new Error("audio_missing");
+
+  const chosenModel = model || DEFAULT_MODELS.gemini;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(chosenModel)}:generateContent`;
+  const response = await fetchImpl(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
+    body: JSON.stringify({
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: TRANSCRIBE_PROMPT },
+            { inlineData: { mimeType: mime, data: audioB64 } }
+          ]
+        }
+      ],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: toGeminiSchema(TRANSCRIBE_SCHEMA),
+        maxOutputTokens: STT_MAX_OUTPUT_TOKENS
+      }
+    })
+  });
+
+  if (!response.ok) throw new Error(`gemini_http_${await readError(response)}`);
+  const data = await response.json();
+
+  const candidate = data.candidates?.[0];
+  if (candidate?.finishReason === "SAFETY") throw new Error("gemini_safety_block");
+  if (candidate?.finishReason === "MAX_TOKENS") throw new Error("gemini_truncated");
+
+  const raw = candidate?.content?.parts?.map((part) => part.text).join("") || "";
+  if (!raw) throw new Error("gemini_empty_response");
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (_) {
+    throw new Error("transcription_not_json");
+  }
+
+  const text = String(parsed?.text || "").trim();
+  if (!text) throw new Error("transcription_empty");
+
+  return {
+    text,
+    lang: parsed?.lang ? String(parsed.lang).toLowerCase().slice(0, 8) : null,
+    tokensIn: data.usageMetadata?.promptTokenCount ?? null,
+    tokensOut: data.usageMetadata?.candidatesTokenCount ?? null
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -355,6 +466,7 @@ function normalizeAnalysis(raw, checklist) {
   return {
     score: computed,
     summary: String(raw?.summary || ""),
+    lead_quality: LEAD_QUALITIES.includes(raw?.lead_quality) ? raw.lead_quality : "unclear",
     items,
     leaks: (Array.isArray(raw?.leaks) ? raw.leaks : []).map((leak) => ({
       title: String(leak?.title || ""),
@@ -372,4 +484,11 @@ function normalizeAnalysis(raw, checklist) {
   };
 }
 
-export const __testing = { ANALYSIS_SCHEMA, toGeminiSchema, normalizeAnalysis, buildUserPrompt };
+export const __testing = {
+  ANALYSIS_SCHEMA,
+  SYSTEM_PROMPT,
+  TRANSCRIBE_PROMPT,
+  toGeminiSchema,
+  normalizeAnalysis,
+  buildUserPrompt
+};

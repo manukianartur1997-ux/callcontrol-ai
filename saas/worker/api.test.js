@@ -12,7 +12,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApi } from "./api.js";
+import { createApi, dailyDigest } from "./api.js";
 import { encryptSecret } from "./crypto.js";
 
 // ---------------------------------------------------------------------------
@@ -204,7 +204,7 @@ async function seedAnalyze(mock, { role = "owner", usageRow = null, quota = 500,
   seedAuth(mock);
   seedMembership(mock, role);
   mock.on("GET", "/rest/v1/organizations", {
-    body: [{ id: ORG_ID, monthly_call_quota: quota, timezone: "Europe/Kyiv", ai_provider: "gemini", ai_model: null }]
+    body: [{ id: ORG_ID, name: "Pilot Co", monthly_call_quota: quota, timezone: "Europe/Kyiv", ai_provider: "gemini", ai_model: null }]
   });
   mock.on("GET", "/rest/v1/usage_counters", { body: usageRow ? [usageRow] : [] });
   mock.on("GET", "/rest/v1/calls", {
@@ -220,6 +220,56 @@ async function seedAnalyze(mock, { role = "owner", usageRow = null, quota = 500,
   mock.on("PATCH", "/rest/v1/calls", { status: 204 });
   // CAS contract: creates and updates ask for return=representation and treat
   // an empty array as "lost the race", so the mock echoes the written row.
+  mock.on("POST", "/rest/v1/usage_counters", (record) => ({ status: 201, body: [record.body] }));
+  mock.on("PATCH", "/rest/v1/usage_counters", (record) => ({ status: 200, body: [record.body] }));
+  mock.on("PATCH", "/rest/v1/org_ai_keys", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+}
+
+const ENV_TG = { ...ENV, TELEGRAM_BOT_TOKEN: "fake-tg-bot-token" }; // synthetic
+
+const AUDIO_B64 = "QUJDREVGRw=="; // tiny synthetic "audio" payload
+
+const STT_TEXT =
+  "Менеджер: Добрый день, это Пётр из CallControl.\nКлиент: Здравствуйте, расскажите про тарифы.";
+
+const GEMINI_STT = {
+  candidates: [
+    { finishReason: "STOP", content: { parts: [{ text: JSON.stringify({ lang: "ru", text: STT_TEXT }) }] } }
+  ],
+  usageMetadata: { promptTokenCount: 5000, candidatesTokenCount: 300 }
+};
+
+// Recordings hit Gemini twice (STT with an inlineData audio part, then the
+// analysis); ONE route tells them apart by the request body.
+async function seedRecordings(mock, {
+  role = "owner",
+  usageRow = { calls_analyzed: 3, tokens_in: 10, tokens_out: 10 },
+  quota = 500,
+  stt,
+  analysis
+} = {}) {
+  seedAuth(mock);
+  seedMembership(mock, role);
+  mock.on("GET", "/rest/v1/organizations", {
+    body: [{ id: ORG_ID, name: "Pilot Co", monthly_call_quota: quota, timezone: "Europe/Kyiv", ai_provider: "gemini", ai_model: null }]
+  });
+  mock.on("GET", "/rest/v1/usage_counters", { body: usageRow ? [usageRow] : [] });
+  mock.on("GET", "/rest/v1/checklists", { body: [{ id: CHECKLIST_ID, items: CHECKLIST_ITEMS }] });
+  mock.on("GET", "/rest/v1/org_ai_keys", {
+    body: [{ id: KEY_ID, key_ciphertext: await encryptSecret(GEMINI_PLAIN_KEY, MASTER_KEY) }]
+  });
+  mock.on("POST", "generativelanguage.googleapis.com", (record) => {
+    const isStt = Boolean(record.body?.contents?.[0]?.parts?.some((part) => part.inlineData));
+    return isStt ? (stt || { status: 200, body: GEMINI_STT }) : (analysis || { status: 200, body: GEMINI_OK });
+  });
+  mock.on("GET", "/rest/v1/calls", {
+    body: [{ id: CALL_ID, org_id: ORG_ID, manager_label: "Іван Іванов", direction: "outbound", duration_sec: 187, status: "pending" }]
+  });
+  mock.on("POST", "/rest/v1/calls", (record) => ({ status: 201, body: [{ id: CALL_ID, ...record.body }] }));
+  mock.on("PATCH", "/rest/v1/calls", { status: 204 });
+  mock.on("POST", "/rest/v1/transcripts", { status: 201 });
+  mock.on("POST", "/rest/v1/analyses", { status: 201 });
   mock.on("POST", "/rest/v1/usage_counters", (record) => ({ status: 201, body: [record.body] }));
   mock.on("PATCH", "/rest/v1/usage_counters", (record) => ({ status: 200, body: [record.body] }));
   mock.on("PATCH", "/rest/v1/org_ai_keys", { status: 204 });
@@ -548,6 +598,31 @@ test("analyze: concurrent CAS loser retries the reservation and still succeeds",
   );
   assert.equal(res.status, 200);
   assert.ok(patchCalls >= 2, `retry never happened (patchCalls=${patchCalls})`);
+});
+
+test("webhook: binotel is acked with the literal {status:success} body", async () => {
+  const mock = createFetchMock();
+  seedWebhook(mock, "binotel", RINGO_TOKEN);
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/telephony/binotel/${RINGO_TOKEN}`, BINOTEL_COMPLETED)
+  );
+  assert.equal(res.status, 200);
+  // Official doc: anything except {"status":"success"} triggers 7 redeliveries.
+  assert.equal((await res.json()).status, "success");
+});
+
+test("webhook: new kinds (phonet/unitalk/streamtele) are routed, unknown still 404", async () => {
+  const mock = createFetchMock();
+  mock.on("GET", "/rest/v1/integrations", { body: [] });
+  for (const kind of ["phonet", "unitalk", "streamtele"]) {
+    const res = await makeApi(mock).handle(
+      send("POST", `/api/telephony/${kind}/${RINGO_TOKEN}`, {})
+    );
+    // Route accepted (token miss -> 404 {ok:false}), NOT an unknown-kind 404
+    assert.deepEqual(await res.json(), { ok: false }, kind);
+  }
+  const res = await makeApi(mock).handle(send("POST", `/api/telephony/asterisk/${RINGO_TOKEN}`, {}));
+  assert.equal((await res.json()).error, "not_found");
 });
 
 test("webhook: a disabled integration is indistinguishable from a token miss", async () => {
@@ -884,7 +959,7 @@ test("webhook: a binotel non-completed requestType is ignored", async () => {
     send("POST", `/api/telephony/binotel/${BINO_TOKEN}`, { requestType: "apiCallSettings" })
   );
   assert.equal(res.status, 200);
-  assert.deepEqual(await res.json(), { ok: true, ignored: true });
+  assert.deepEqual(await res.json(), { status: "success", ignored: true });
   assert.equal(mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/calls")), false);
 });
 
@@ -1174,8 +1249,11 @@ test("register-org happy path: account, org, owner, checklist and both integrati
   );
   assert.match(integrations.headers.prefer, /ignore-duplicates/);
   assert.match(decodeURIComponent(integrations.url), /on_conflict=org_id,kind/);
-  assert.equal(integrations.body.length, 2);
-  assert.deepEqual(integrations.body.map((row) => row.kind).sort(), ["binotel", "ringostat"]);
+  assert.equal(integrations.body.length, 5);
+  assert.deepEqual(
+    integrations.body.map((row) => row.kind).sort(),
+    ["binotel", "phonet", "ringostat", "streamtele", "unitalk"]
+  );
   for (const row of integrations.body) {
     assert.equal(row.org_id, NEW_ORG_ID);
     assert.equal(row.enabled, true);
@@ -1189,6 +1267,27 @@ test("register-org happy path: account, org, owner, checklist and both integrati
   assert.equal(audit.body.actor_id, NEW_USER_ID);
   assert.equal(audit.body.target, NEW_ORG_ID);
   assert.equal(audit.init.body.includes("fake-reg-pass-1"), false);
+});
+
+test("org seeding falls back to the legacy two kinds while the DB check predates 0004", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  let integrationPosts = 0;
+  mock.on("POST", "/rest/v1/integrations", (record) => {
+    integrationPosts += 1;
+    return integrationPosts === 1
+      ? { status: 400, body: { message: 'new row violates check constraint "integrations_kind_check"' } }
+      : { status: 201 };
+  });
+  seedOrgCreation(mock);
+  const res = await makeApi(mock, ENV_SIGNUP).handle(
+    send("POST", "/api/app/orgs", { signup_code: SIGNUP_CODE, org_name: "Legacy DB Co" }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  const posts = mock.requests.filter((r) => r.method === "POST" && r.url.includes("/rest/v1/integrations"));
+  assert.equal(posts.length, 2);
+  assert.equal(posts[0].body.length, 5, "first try seeds all five");
+  assert.deepEqual(posts[1].body.map((row) => row.kind).sort(), ["binotel", "ringostat"]);
 });
 
 test("register-org: confirmations-on signup returns the confirmation flag", async () => {
@@ -1306,4 +1405,785 @@ test("orgs POST (authed): a signed-in user creates a company with the code", asy
   assert.equal(membership.body.user_id, USER_ID);
   assert.equal(membership.body.role, "owner");
   assert.equal(membership.body.full_name, "Артур", "owner name comes from user_metadata");
+});
+
+// ---------------------------------------------------------------------------
+// Recordings: audio upload -> STT -> analysis
+// ---------------------------------------------------------------------------
+
+function recordingBody(overrides = {}) {
+  return { audio_b64: AUDIO_B64, mime: "audio/mpeg", direction: "inbound", ...overrides };
+}
+
+test("recordings: a manager cannot overwrite a peer's call transcript", async () => {
+  const mock = createFetchMock();
+  await seedRecordings(mock, { role: "manager" });
+  // The target call belongs to someone else.
+  mock.on("GET", "/rest/v1/calls", {
+    body: [{ id: CALL_ID, org_id: ORG_ID, manager_id: NEW_USER_ID, department_id: null, status: "analyzed" }]
+  });
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`,
+      { call_id: CALL_ID, mime: "audio/mpeg", audio_b64: "QUJD" }, GOOD_TOKEN)
+  );
+  // Same opaque 404 as a foreign call — no ownership oracle.
+  assert.equal(res.status, 404);
+  assert.equal((await res.json()).error, "call_not_found");
+  assert.equal(mock.requests.some((r) => r.url.includes("generativelanguage")), false);
+});
+
+test("recordings: a huge declared Content-Length is rejected before buffering", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  const req = new Request(`https://worker.test/api/app/orgs/${ORG_ID}/recordings`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "content-length": "99000000",
+      authorization: `Bearer ${GOOD_TOKEN}`
+    },
+    body: JSON.stringify({ mime: "audio/mpeg", audio_b64: "QUJD" })
+  });
+  const res = await makeApi(mock).handle(req);
+  assert.equal(res.status, 413);
+});
+
+test("recordings: viewers are read-only", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "viewer");
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody(), GOOD_TOKEN)
+  );
+  assert.equal(res.status, 403);
+});
+
+test("recordings: an unsupported mime and missing audio are rejected before any read", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  const api = makeApi(mock);
+
+  const badMime = await api.handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody({ mime: "audio/flac" }), GOOD_TOKEN)
+  );
+  assert.equal(badMime.status, 400);
+  assert.deepEqual(await badMime.json(), { error: "bad_mime" });
+
+  const noAudio = await api.handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody({ audio_b64: "" }), GOOD_TOKEN)
+  );
+  assert.equal(noAudio.status, 400);
+  assert.deepEqual(await noAudio.json(), { error: "audio_required" });
+
+  assert.equal(mock.requests.some((r) => r.url.includes("/rest/v1/organizations")), false);
+});
+
+test("recordings: the ~15MB base64 size cap answers 413 before anything is spent", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  const res = await makeApi(mock).handle(
+    send(
+      "POST",
+      `/api/app/orgs/${ORG_ID}/recordings`,
+      recordingBody({ audio_b64: "a".repeat(20_000_001) }),
+      GOOD_TOKEN
+    )
+  );
+  assert.equal(res.status, 413);
+  assert.deepEqual(await res.json(), { error: "audio_too_large" });
+  assert.equal(mock.requests.some((r) => r.url.includes("generativelanguage")), false);
+});
+
+test("recordings: quota reached is 429 and Gemini is never called", async () => {
+  const mock = createFetchMock();
+  await seedRecordings(mock, { quota: 5, usageRow: { calls_analyzed: 5, tokens_in: 0, tokens_out: 0 } });
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody(), GOOD_TOKEN)
+  );
+  assert.equal(res.status, 429);
+  assert.deepEqual(await res.json(), { error: "quota_exceeded" });
+  assert.equal(mock.requests.some((r) => r.url.includes("generativelanguage")), false);
+});
+
+test("recordings happy path: one slot, STT + analysis, transcript persisted with STT tokens counted", async () => {
+  const mock = createFetchMock();
+  await seedRecordings(mock);
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody(), GOOD_TOKEN)
+  );
+
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.call_id, CALL_ID);
+  assert.equal(body.analysis.score, 60);
+  assert.equal(body.analysis.lead_quality, "unclear");
+
+  // Two Gemini calls: STT (inline audio) first, then the analysis.
+  const gemini = mock.requests.filter((r) => r.url.includes("generativelanguage"));
+  assert.equal(gemini.length, 2);
+  const sttParts = gemini[0].body.contents[0].parts;
+  const audioPart = sttParts.find((part) => part.inlineData);
+  assert.equal(audioPart.inlineData.mimeType, "audio/mpeg");
+  assert.equal(audioPart.inlineData.data, AUDIO_B64);
+  assert.equal(gemini[0].headers["x-goog-api-key"], GEMINI_PLAIN_KEY);
+
+  // ONE slot, reserved BEFORE any provider spend (CAS 3 -> 4).
+  const reserve = mock.requests.find(
+    (r) => r.method === "PATCH" && r.url.includes("/rest/v1/usage_counters")
+  );
+  assert.equal(reserve.body.calls_analyzed, 4);
+  assert.ok(
+    mock.requests.indexOf(reserve) < mock.requests.indexOf(gemini[0]),
+    "slot must be reserved before STT runs"
+  );
+
+  // A fresh call row: source upload, minted external id, transcribed status.
+  const callInsert = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/calls"));
+  assert.match(callInsert.headers.prefer, /return=representation/);
+  assert.equal(callInsert.body.source, "upload");
+  assert.match(callInsert.body.external_id, /^upload-[0-9a-f-]{36}$/);
+  assert.equal(callInsert.body.direction, "inbound");
+  assert.equal(callInsert.body.status, "transcribed");
+  assert.equal(callInsert.body.manager_id, null, "no manager picked = unassigned");
+
+  // The transcript row is an upsert keyed on call_id, provider gemini-audio.
+  const transcript = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/transcripts"));
+  assert.match(decodeURIComponent(transcript.url), /on_conflict=call_id/);
+  assert.match(transcript.headers.prefer, /merge-duplicates/);
+  assert.equal(transcript.body.call_id, CALL_ID);
+  assert.equal(transcript.body.text, STT_TEXT);
+  assert.equal(transcript.body.lang, "ru");
+  assert.equal(transcript.body.provider, "gemini-audio");
+
+  // The analysis row counts analysis tokens; usage counts STT + analysis.
+  const analysis = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/analyses"));
+  assert.equal(analysis.body.score, 60);
+  assert.equal(analysis.body.tokens_in, 900);
+  assert.equal(analysis.body.tokens_out, 210);
+
+  const usagePatches = mock.requests.filter(
+    (r) => r.method === "PATCH" && r.url.includes("/rest/v1/usage_counters")
+  );
+  const tokens = usagePatches[usagePatches.length - 1].body;
+  assert.equal(tokens.calls_analyzed, 3, "the single reserved slot stays consumed");
+  assert.equal(tokens.tokens_in, 10 + 900 + 5000, "STT tokens are billed too");
+  assert.equal(tokens.tokens_out, 10 + 210 + 300);
+
+  const callPatch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/calls"));
+  assert.equal(callPatch.body.status, "analyzed");
+
+  // The raw audio never lands in the database.
+  for (const r of mock.requests) {
+    if (r.url.includes("/rest/v1/")) {
+      assert.equal(String(r.init.body || "").includes(AUDIO_B64), false, `audio leaked to ${r.url}`);
+    }
+  }
+});
+
+test("recordings: a manager always uploads for themself, whatever manager_id says", async () => {
+  const mock = createFetchMock();
+  await seedRecordings(mock, { role: "manager" });
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody({ manager_id: NEW_USER_ID }), GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  const callInsert = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/calls"));
+  assert.equal(callInsert.body.manager_id, USER_ID);
+  assert.equal(callInsert.body.manager_label, "Тест");
+});
+
+test("recordings: owner assigns a member; the member's department rides along", async () => {
+  const mock = createFetchMock();
+  mock.on("GET", "/rest/v1/memberships", (record) => {
+    if (record.url.includes(`user_id=eq.${USER_ID}`)) {
+      return { body: [{ id: "m-1", user_id: USER_ID, role: "owner", full_name: "Тест", extension: null, department_id: null }] };
+    }
+    if (record.url.includes(`user_id=eq.${NEW_USER_ID}`)) {
+      return { body: [{ user_id: NEW_USER_ID, role: "manager", full_name: "Петро Коваль", department_id: DEPARTMENT_ID }] };
+    }
+    return { body: [] };
+  });
+  await seedRecordings(mock);
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody({ manager_id: NEW_USER_ID }), GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  const callInsert = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/calls"));
+  assert.equal(callInsert.body.manager_id, NEW_USER_ID);
+  assert.equal(callInsert.body.manager_label, "Петро Коваль");
+  assert.equal(callInsert.body.department_id, DEPARTMENT_ID);
+});
+
+test("recordings: a lead cannot assign a manager outside their department", async () => {
+  const mock = createFetchMock();
+  mock.on("GET", "/rest/v1/memberships", (record) => {
+    if (record.url.includes(`user_id=eq.${USER_ID}`)) {
+      return { body: [{ id: "m-1", user_id: USER_ID, role: "lead", full_name: "Лід", extension: null, department_id: null }] };
+    }
+    if (record.url.includes(`user_id=eq.${NEW_USER_ID}`)) {
+      return { body: [{ user_id: NEW_USER_ID, role: "manager", full_name: "Петро Коваль", department_id: DEPARTMENT_ID }] };
+    }
+    return { body: [] };
+  });
+  await seedRecordings(mock);
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody({ manager_id: NEW_USER_ID }), GOOD_TOKEN)
+  );
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: "bad_manager_id" });
+  assert.equal(mock.requests.some((r) => r.url.includes("generativelanguage")), false);
+});
+
+test("recordings: STT failure marks the call failed, refunds the slot, saves nothing", async () => {
+  const mock = createFetchMock();
+  await seedRecordings(mock, { stt: { status: 500, body: { error: { message: "stt boom" } } } });
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody({ call_id: CALL_ID }), GOOD_TOKEN)
+  );
+
+  assert.equal(res.status, 502);
+  const body = await res.json();
+  assert.equal(body.error, "transcription_failed");
+  assert.match(body.detail, /gemini_http_500/);
+
+  assert.equal(mock.requests.filter((r) => r.url.includes("generativelanguage")).length, 1);
+  assert.equal(mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/transcripts")), false);
+  assert.equal(mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/analyses")), false);
+
+  const callPatch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/calls"));
+  assert.equal(callPatch.body.status, "failed");
+
+  // Reserved (3 -> 4), then refunded (re-read 3 -> 2): the failed upload is free.
+  const patches = mock.requests.filter(
+    (r) => r.method === "PATCH" && r.url.includes("/rest/v1/usage_counters")
+  );
+  assert.equal(patches[0].body.calls_analyzed, 4);
+  assert.equal(patches[patches.length - 1].body.calls_analyzed, 2);
+
+  const audit = mock.requests.find((r) => r.method === "POST" && r.url.includes("audit_log"));
+  assert.equal(audit.body.action, "call.transcribe_failed");
+});
+
+test("recordings: analysis failure KEEPS the transcript so a retry pays no second STT", async () => {
+  const mock = createFetchMock();
+  await seedRecordings(mock, { analysis: { status: 500, body: { error: { message: "llm boom" } } } });
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody(), GOOD_TOKEN)
+  );
+
+  assert.equal(res.status, 502);
+  assert.equal((await res.json()).error, "analysis_failed");
+
+  // The transcript row landed before the analysis stage ran.
+  const transcript = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/transcripts"));
+  assert.equal(transcript.body.text, STT_TEXT);
+
+  // The call stays `transcribed` (NOT failed) — plain /analyze can retry it.
+  const callPatch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/calls"));
+  assert.equal(callPatch.body.status, "transcribed");
+  assert.match(callPatch.body.error, /gemini_http_500/);
+
+  // Slot refunded, but the STT tokens that were genuinely spent stay counted.
+  const patches = mock.requests.filter(
+    (r) => r.method === "PATCH" && r.url.includes("/rest/v1/usage_counters")
+  );
+  const refund = patches[patches.length - 1].body;
+  assert.equal(refund.calls_analyzed, 2);
+  assert.equal(refund.tokens_in, 10 + 5000);
+  assert.equal(refund.tokens_out, 10 + 300);
+});
+
+// ---------------------------------------------------------------------------
+// Integration credentials
+// ---------------------------------------------------------------------------
+
+test("credentials PUT: owner only, kind must exist in the provider manifest", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "admin");
+  const admin = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/integrations/binotel/credentials`, { fields: { apiKey: "x" } }, GOOD_TOKEN)
+  );
+  assert.equal(admin.status, 403);
+
+  const mock2 = createFetchMock();
+  seedAuth(mock2);
+  seedMembership(mock2, "owner");
+  const unknown = await makeApi(mock2).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/integrations/asterisk/credentials`, { fields: { apiKey: "x" } }, GOOD_TOKEN)
+  );
+  assert.equal(unknown.status, 404);
+  assert.deepEqual(await unknown.json(), { error: "unknown_kind" });
+  assert.equal(mock2.requests.some((r) => r.url.includes("integration_secrets")), false);
+});
+
+test("credentials PUT: no integrations row for that kind yet is 404", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  // `phonet` passing kind validation proves the PROVIDERS manifest is wired in.
+  mock.on("GET", "/rest/v1/integrations", { body: [] });
+  const res = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/integrations/phonet/credentials`, { fields: { apiKey: "x" } }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 404);
+  assert.deepEqual(await res.json(), { error: "integration_not_found" });
+});
+
+test("credentials PUT: values are encrypted, audited by NAME only, never echoed", async () => {
+  const SECRET_VALUE = "fake-binotel-secret-000"; // synthetic
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("GET", "/rest/v1/integrations", { body: [{ id: INTEGRATION_ID }] });
+  mock.on("POST", "/rest/v1/integration_secrets", { status: 201 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send(
+      "PUT",
+      `/api/app/orgs/${ORG_ID}/integrations/binotel/credentials`,
+      { fields: { apiKey: "fake-binotel-key-000", apiSecret: SECRET_VALUE } },
+      GOOD_TOKEN
+    )
+  );
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true, field_names: ["apiKey", "apiSecret"] });
+
+  const upsert = mock.requests.find((r) => r.method === "POST" && r.url.includes("integration_secrets"));
+  assert.match(decodeURIComponent(upsert.url), /on_conflict=integration_id/);
+  assert.match(upsert.headers.prefer, /merge-duplicates/);
+  assert.equal(upsert.body.integration_id, INTEGRATION_ID);
+  assert.equal(upsert.body.org_id, ORG_ID);
+  assert.match(upsert.body.secret_ciphertext, /^v1\./);
+  assert.equal(upsert.init.body.includes(SECRET_VALUE), false, "plaintext must never reach PostgREST");
+
+  const audit = mock.requests.find((r) => r.method === "POST" && r.url.includes("audit_log"));
+  assert.equal(audit.body.action, "integration.credentials_set");
+  assert.deepEqual(audit.body.meta, { kind: "binotel", fields: ["apiKey", "apiSecret"] });
+  assert.equal(audit.init.body.includes(SECRET_VALUE), false);
+});
+
+test("credentials PUT: malformed fields are rejected before touching the DB", async () => {
+  const cases = [
+    { fields: null },
+    { fields: {} },
+    { fields: { apiKey: 42 } },
+    { fields: { "bad key!": "x" } },
+    { fields: { apiKey: "x".repeat(501) } },
+    {}
+  ];
+  for (const body of cases) {
+    const mock = createFetchMock();
+    seedAuth(mock);
+    seedMembership(mock, "owner");
+    const res = await makeApi(mock).handle(
+      send("PUT", `/api/app/orgs/${ORG_ID}/integrations/binotel/credentials`, body, GOOD_TOKEN)
+    );
+    assert.equal(res.status, 400, JSON.stringify(body).slice(0, 60));
+    assert.equal(mock.requests.some((r) => r.url.includes("/rest/v1/integrations")), false);
+  }
+});
+
+test("credentials GET: configured -> field names only, never a value", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "admin");
+  mock.on("GET", "/rest/v1/integrations", { body: [{ id: INTEGRATION_ID }] });
+  mock.on("GET", "/rest/v1/integration_secrets", {
+    body: [{
+      secret_ciphertext: await encryptSecret(
+        JSON.stringify({ apiKey: "fake-key-value-000", apiSecret: "fake-secret-value-000" }),
+        MASTER_KEY
+      )
+    }]
+  });
+
+  const res = await makeApi(mock).handle(
+    get(`/api/app/orgs/${ORG_ID}/integrations/binotel/credentials`, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.deepEqual(body, { configured: true, field_names: ["apiKey", "apiSecret"] });
+  assert.equal(JSON.stringify(body).includes("fake-key-value-000"), false);
+  assert.equal(JSON.stringify(body).includes("fake-secret-value-000"), false);
+});
+
+test("credentials GET: not configured yet", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("GET", "/rest/v1/integrations", { body: [{ id: INTEGRATION_ID }] });
+  mock.on("GET", "/rest/v1/integration_secrets", { body: [] });
+  const res = await makeApi(mock).handle(
+    get(`/api/app/orgs/${ORG_ID}/integrations/ringostat/credentials`, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { configured: false, field_names: [] });
+});
+
+// ---------------------------------------------------------------------------
+// Telegram recipients
+// ---------------------------------------------------------------------------
+
+test("telegram GET: owner/admin only", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "manager");
+  const res = await makeApi(mock).handle(get(`/api/app/orgs/${ORG_ID}/telegram`, GOOD_TOKEN));
+  assert.equal(res.status, 403);
+});
+
+test("telegram GET: rows come back; a missing table is 503 migration_required", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  const rows = [
+    { id: "tr-1", chat_id: "-100777888999", kind: "per_call", label: "РОП", created_at: "2026-08-14T00:00:00Z" }
+  ];
+  mock.on("GET", "/rest/v1/telegram_recipients", { body: rows });
+  const ok = await makeApi(mock).handle(get(`/api/app/orgs/${ORG_ID}/telegram`, GOOD_TOKEN));
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { recipients: rows });
+
+  const mock2 = createFetchMock();
+  seedAuth(mock2);
+  seedMembership(mock2, "owner");
+  mock2.on("GET", "/rest/v1/telegram_recipients", {
+    status: 404,
+    body: { code: "PGRST205", message: "Could not find the table 'public.telegram_recipients'" }
+  });
+  const missing = await makeApi(mock2).handle(get(`/api/app/orgs/${ORG_ID}/telegram`, GOOD_TOKEN));
+  assert.equal(missing.status, 503);
+  assert.deepEqual(await missing.json(), { error: "migration_required" });
+});
+
+test("telegram PUT replaces the whole set: delete first, then insert", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "admin");
+  mock.on("DELETE", "/rest/v1/telegram_recipients", { status: 204 });
+  mock.on("POST", "/rest/v1/telegram_recipients", { status: 201 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/telegram`, {
+      recipients: [
+        { chat_id: "-100777888999", kind: "per_call", label: "РОП" },
+        { chat_id: "987654321", kind: "daily" }
+      ]
+    }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true, count: 2 });
+
+  const del = mock.requests.find((r) => r.method === "DELETE" && r.url.includes("telegram_recipients"));
+  const insert = mock.requests.find((r) => r.method === "POST" && r.url.includes("telegram_recipients"));
+  assert.match(decodeURIComponent(del.url), new RegExp(`org_id=eq\\.${ORG_ID}`));
+  assert.ok(mock.requests.indexOf(del) < mock.requests.indexOf(insert), "replace = delete before insert");
+  assert.deepEqual(insert.body, [
+    { org_id: ORG_ID, chat_id: "-100777888999", kind: "per_call", label: "РОП" },
+    { org_id: ORG_ID, chat_id: "987654321", kind: "daily", label: null }
+  ]);
+});
+
+test("telegram PUT: chat_id regex, kind whitelist and the 10-row cap are enforced", async () => {
+  const cases = [
+    { body: { recipients: [{ chat_id: "abc", kind: "daily" }] }, error: "bad_chat_id" },
+    { body: { recipients: [{ chat_id: "1234", kind: "daily" }] }, error: "bad_chat_id" },
+    { body: { recipients: [{ chat_id: "@channel", kind: "daily" }] }, error: "bad_chat_id" },
+    { body: { recipients: [{ chat_id: "123456789", kind: "weekly" }] }, error: "bad_kind" },
+    {
+      body: { recipients: Array.from({ length: 11 }, () => ({ chat_id: "123456789", kind: "daily" })) },
+      error: "too_many_recipients"
+    },
+    { body: { recipients: "nope" }, error: "bad_recipients" }
+  ];
+  for (const c of cases) {
+    const mock = createFetchMock();
+    seedAuth(mock);
+    seedMembership(mock, "owner");
+    const res = await makeApi(mock).handle(
+      send("PUT", `/api/app/orgs/${ORG_ID}/telegram`, c.body, GOOD_TOKEN)
+    );
+    assert.equal(res.status, 400, c.error);
+    assert.deepEqual(await res.json(), { error: c.error });
+    assert.equal(mock.requests.some((r) => r.url.includes("telegram_recipients")), false);
+  }
+});
+
+test("telegram PUT: a missing table is 503 migration_required", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("DELETE", "/rest/v1/telegram_recipients", { status: 404, body: { code: "PGRST205" } });
+  const res = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/telegram`, {
+      recipients: [{ chat_id: "123456789", kind: "daily" }]
+    }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 503);
+  assert.deepEqual(await res.json(), { error: "migration_required" });
+});
+
+// ---------------------------------------------------------------------------
+// Per-call Telegram notifications
+// ---------------------------------------------------------------------------
+
+test("analyze: per_call recipients get a transcript-free summary", async () => {
+  const mock = createFetchMock();
+  await seedAnalyze(mock);
+  mock.on("GET", "/rest/v1/telegram_recipients", { body: [{ chat_id: "-100777888999" }] });
+  mock.on("POST", "api.telegram.org", { status: 200, body: { ok: true } });
+
+  const res = await makeApi(mock, ENV_TG).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/analyze`, { call_id: CALL_ID }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+
+  const recipientsRead = mock.requests.find((r) => r.url.includes("telegram_recipients"));
+  assert.match(decodeURIComponent(recipientsRead.url), /kind=eq\.per_call/);
+
+  const tg = mock.requests.find((r) => r.url.includes("api.telegram.org"));
+  assert.ok(tg, "sendMessage must be called");
+  assert.match(tg.url, /\/sendMessage$/);
+  assert.equal(tg.body.chat_id, "-100777888999");
+  assert.match(tg.body.text, /Pilot Co/);
+  assert.match(tg.body.text, /Іван Іванов/);
+  assert.match(tg.body.text, /60\/100/);
+  // Privacy: not a word of the conversation leaves the org's database.
+  assert.equal(tg.body.text.includes("тарифы"), false);
+  assert.equal(tg.body.text.includes(TRANSCRIPT), false);
+
+  // The bot token goes to Telegram only — never into the database.
+  for (const r of mock.requests) {
+    if (r.url.includes("api.telegram.org")) continue;
+    assert.equal(r.url.includes("fake-tg-bot-token"), false);
+    assert.equal(String(r.init.body || "").includes("fake-tg-bot-token"), false);
+  }
+});
+
+test("analyze: a missing telegram table (or absent token) never breaks the analysis", async () => {
+  const mock = createFetchMock();
+  await seedAnalyze(mock);
+  mock.on("GET", "/rest/v1/telegram_recipients", { status: 404, body: { code: "PGRST205" } });
+  const res = await makeApi(mock, ENV_TG).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/analyze`, { call_id: CALL_ID }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  assert.equal(mock.requests.some((r) => r.url.includes("api.telegram.org")), false);
+
+  // No token at all: telegram_recipients is not even read.
+  const mock2 = createFetchMock();
+  await seedAnalyze(mock2);
+  const res2 = await makeApi(mock2, ENV).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/analyze`, { call_id: CALL_ID }, GOOD_TOKEN)
+  );
+  assert.equal(res2.status, 200);
+  assert.equal(mock2.requests.some((r) => r.url.includes("telegram_recipients")), false);
+});
+
+test("recordings: a successful upload also pings the per_call recipients", async () => {
+  const mock = createFetchMock();
+  await seedRecordings(mock);
+  mock.on("GET", "/rest/v1/telegram_recipients", { body: [{ chat_id: "555556666" }] });
+  mock.on("POST", "api.telegram.org", { status: 200, body: { ok: true } });
+  const res = await makeApi(mock, ENV_TG).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody(), GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  const tg = mock.requests.find((r) => r.url.includes("api.telegram.org"));
+  assert.equal(tg.body.chat_id, "555556666");
+  assert.equal(tg.body.text.includes(STT_TEXT), false, "no transcript in the ping");
+});
+
+// ---------------------------------------------------------------------------
+// Org settings (avg_deal_amount — migration 0004)
+// ---------------------------------------------------------------------------
+
+test("org-settings PUT: owner only", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "admin");
+  const res = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/org-settings`, { avg_deal_amount: 1000 }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 403);
+});
+
+test("org-settings PUT: stores a number, clears with null, rejects garbage", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("PATCH", "/rest/v1/organizations", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+  const api = makeApi(mock);
+
+  const set = await api.handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/org-settings`, { avg_deal_amount: 25000 }, GOOD_TOKEN)
+  );
+  assert.equal(set.status, 200);
+  const patch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("organizations"));
+  assert.deepEqual(patch.body, { avg_deal_amount: 25000 });
+
+  const clear = await api.handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/org-settings`, { avg_deal_amount: null }, GOOD_TOKEN)
+  );
+  assert.equal(clear.status, 200);
+  const patches = mock.requests.filter((r) => r.method === "PATCH" && r.url.includes("organizations"));
+  assert.deepEqual(patches[patches.length - 1].body, { avg_deal_amount: null });
+
+  // NaN is absent on purpose: JSON cannot express it (it serializes to null).
+  for (const bad of ["25000", -1, 1e13]) {
+    const res = await api.handle(
+      send("PUT", `/api/app/orgs/${ORG_ID}/org-settings`, { avg_deal_amount: bad }, GOOD_TOKEN)
+    );
+    assert.equal(res.status, 400, String(bad));
+  }
+});
+
+test("org-settings PUT: a pre-0004 database answers 503 migration_required", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("PATCH", "/rest/v1/organizations", {
+    status: 400,
+    body: { code: "PGRST204", message: "Could not find the 'avg_deal_amount' column of 'organizations'" }
+  });
+  const res = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/org-settings`, { avg_deal_amount: 25000 }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 503);
+  assert.deepEqual(await res.json(), { error: "migration_required" });
+});
+
+test("/me merges avg_deal_amount and ui_language from the defensive second query", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  mock.on("GET", "/rest/v1/memberships", {
+    body: [{
+      org_id: ORG_ID,
+      role: "owner",
+      extension: null,
+      full_name: "Артур",
+      department_id: null,
+      organization: { id: ORG_ID, name: "Pilot Co", slug: "pilot-co", plan: "pilot" }
+    }]
+  });
+  mock.on("GET", "/rest/v1/organizations", {
+    body: [{ id: ORG_ID, avg_deal_amount: 50000, ui_language: "uk" }]
+  });
+
+  const res = await makeApi(mock).handle(get("/api/app/me", GOOD_TOKEN));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.memberships[0].organization.avg_deal_amount, 50000);
+  assert.equal(body.memberships[0].organization.ui_language, "uk");
+
+  // The extras ride a SEPARATE organizations query (a missing column inside
+  // the embedded select would fail the whole /me read).
+  const extras = mock.requests.find((r) => r.url.includes("/rest/v1/organizations"));
+  const query = decodeURIComponent(extras.url);
+  assert.match(query, /select=id,avg_deal_amount,ui_language/);
+  assert.match(query, new RegExp(`id=in\\.\\(${ORG_ID}\\)`));
+});
+
+test("/me on a pre-0004 database: extras query fails, /me still answers", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  mock.on("GET", "/rest/v1/memberships", {
+    body: [{
+      org_id: ORG_ID,
+      role: "owner",
+      extension: null,
+      full_name: "Артур",
+      department_id: null,
+      organization: { id: ORG_ID, name: "Pilot Co", slug: "pilot-co", plan: "pilot" }
+    }]
+  });
+  mock.on("GET", "/rest/v1/organizations", {
+    status: 400,
+    body: { code: "42703", message: "column organizations.avg_deal_amount does not exist" }
+  });
+
+  const res = await makeApi(mock).handle(get("/api/app/me", GOOD_TOKEN));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.memberships[0].organization.slug, "pilot-co");
+  assert.equal("avg_deal_amount" in body.memberships[0].organization, false);
+});
+
+// ---------------------------------------------------------------------------
+// Daily digest (cron)
+// ---------------------------------------------------------------------------
+
+test("dailyDigest: no-op without the bot token or without the table", async () => {
+  const mock = createFetchMock();
+  await dailyDigest(ENV, mock); // no TELEGRAM_BOT_TOKEN
+  assert.equal(mock.requests.length, 0);
+
+  const mock2 = createFetchMock();
+  mock2.on("GET", "/rest/v1/telegram_recipients", { status: 404, body: { code: "PGRST205" } });
+  await dailyDigest(ENV_TG, mock2); // table not migrated yet
+  assert.equal(mock2.requests.some((r) => r.url.includes("api.telegram.org")), false);
+});
+
+test("dailyDigest: yesterday's UTC window, stats and the manager top-3", async () => {
+  const mock = createFetchMock();
+  mock.on("GET", "/rest/v1/telegram_recipients", {
+    body: [
+      { org_id: ORG_ID, chat_id: "111112222" },
+      { org_id: ORG_ID, chat_id: "333334444" }
+    ]
+  });
+  mock.on("GET", "/rest/v1/organizations", { body: [{ id: ORG_ID, name: "Pilot Co" }] });
+  mock.on("GET", "/rest/v1/analyses", {
+    body: [
+      { score: 80, call_id: "c-1", call: { manager_label: "Іван" } },
+      { score: 40, call_id: "c-2", call: { manager_label: "Петро" } },
+      { score: 60, call_id: "c-3", call: { manager_label: "Іван" } }
+    ]
+  });
+  mock.on("POST", "api.telegram.org", { status: 200, body: { ok: true } });
+
+  await dailyDigest(ENV_TG, mock);
+
+  // Yesterday as a whole UTC day.
+  const now = new Date();
+  const endMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const analysesQuery = decodeURIComponent(
+    mock.requests.find((r) => r.url.includes("/rest/v1/analyses")).url
+  );
+  assert.match(analysesQuery, new RegExp(`org_id=eq\\.${ORG_ID}`));
+  assert.ok(analysesQuery.includes(`created_at=gte.${new Date(endMs - 86_400_000).toISOString()}`));
+  assert.ok(analysesQuery.includes(`created_at=lt.${new Date(endMs).toISOString()}`));
+
+  const sends = mock.requests.filter((r) => r.url.includes("api.telegram.org"));
+  assert.equal(sends.length, 2, "every daily recipient gets the digest");
+  assert.deepEqual(sends.map((r) => r.body.chat_id).sort(), ["111112222", "333334444"]);
+
+  const text = sends[0].body.text;
+  assert.match(text, /Pilot Co/);
+  assert.match(text, /Проанализировано: 3/);
+  assert.match(text, /Средний балл: 60\/100/);
+  assert.match(text, /Лучший звонок: 80\/100 — Іван/);
+  assert.match(text, /Худший звонок: 40\/100 — Петро/);
+  assert.match(text, /1\. Іван — 70\/100 \(2 зв\.\)/);
+  assert.match(text, /2\. Петро — 40\/100 \(1 зв\.\)/);
+});
+
+test("dailyDigest: an org with zero analyzed calls still gets an honest digest", async () => {
+  const mock = createFetchMock();
+  mock.on("GET", "/rest/v1/telegram_recipients", { body: [{ org_id: ORG_ID, chat_id: "111112222" }] });
+  mock.on("GET", "/rest/v1/organizations", { body: [{ id: ORG_ID, name: "Pilot Co" }] });
+  mock.on("GET", "/rest/v1/analyses", { body: [] });
+  mock.on("POST", "api.telegram.org", { status: 200, body: { ok: true } });
+
+  await dailyDigest(ENV_TG, mock);
+  const tg = mock.requests.find((r) => r.url.includes("api.telegram.org"));
+  assert.match(tg.body.text, /не было/);
 });

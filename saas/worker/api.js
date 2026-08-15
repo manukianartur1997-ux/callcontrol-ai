@@ -17,9 +17,10 @@
 // Webhooks have no user: the per-org webhook_token in the URL is the
 // credential (see telephony.js for why), so the only lookup is token+kind.
 
-import { analyzeCall, supportedProviders } from "./ai.js";
+import { analyzeCall, transcribeAudio, supportedProviders } from "./ai.js";
 import { decryptSecret, encryptSecret, keyHint } from "./crypto.js";
 import { normalizeEvent, isCompletedCallEvent, resolveManager } from "./telephony.js";
+import * as telephonyModule from "./telephony.js";
 import { getUser, createTokenCache } from "./auth.js";
 import { sbGet, sbPost, sbPatch, sbEq } from "./supabase-rest.js";
 
@@ -27,7 +28,61 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const ROLES = new Set(["owner", "admin", "lead", "manager", "viewer"]);
 // An admin staffs the org but cannot mint peers or a second owner.
 const ADMIN_GRANTABLE = new Set(["lead", "manager", "viewer"]);
-const TELEPHONY_KINDS = new Set(["ringostat", "binotel"]);
+// Keep in sync with PROVIDERS in telephony.js and the integrations.kind
+// CHECK in migration 0004.
+const TELEPHONY_KINDS = new Set(["ringostat", "binotel", "phonet", "unitalk", "streamtele"]);
+
+// Audio uploads travel base64-inside-JSON; 20M base64 chars decode to ~15MB
+// of audio (roughly a 30-minute mp3). Anything bigger belongs in object
+// storage, not in a Worker request body.
+const MAX_AUDIO_B64_CHARS = 20_000_000;
+const RECORDING_MIMES = new Set(["audio/mpeg", "audio/wav", "audio/mp4", "audio/ogg", "audio/webm"]);
+const RECORDING_DIRECTIONS = new Set(["inbound", "outbound"]);
+
+// Telegram chat ids are numeric (groups negative); usernames are deliberately
+// NOT accepted — resolving them needs extra bot API calls and permissions.
+const TELEGRAM_CHAT_ID_RE = /^-?\d{5,20}$/;
+const TELEGRAM_RECIPIENT_KINDS = new Set(["per_call", "daily"]);
+const MAX_TELEGRAM_RECIPIENTS = 10;
+
+// Credential kinds come from the PROVIDERS manifest in telephony.js — an
+// array of { kind, credentialFields, … } entries in the multi-PBX revision.
+// Read lazily and defensively (either an array of entries or an object keyed
+// by kind) so this module keeps working while that file evolves in parallel;
+// without a usable manifest it falls back to the built-in two kinds.
+function credentialKinds() {
+  const manifest = telephonyModule.PROVIDERS;
+  if (Array.isArray(manifest)) {
+    const kinds = manifest.map((entry) => entry?.kind).filter(Boolean);
+    if (kinds.length) return new Set(kinds);
+  } else if (manifest && typeof manifest === "object") {
+    const keys = Object.keys(manifest);
+    if (keys.length) return new Set(keys);
+  }
+  return TELEPHONY_KINDS;
+}
+
+// Migration 0004 ships telegram_recipients and the organizations columns
+// avg_deal_amount / ui_language. Until it is applied, PostgREST answers 404
+// (PGRST205, unknown table) or 400 (PGRST204/42703, unknown column); both
+// must degrade to 503 migration_required or a silent no-op — never a crash.
+function isMissingTableError(error) {
+  return /supabase_[a-z]+_404|PGRST205|42P01/.test(String(error?.message || ""));
+}
+
+function isMissingColumnError(error) {
+  return /PGRST204|42703/.test(String(error?.message || ""));
+}
+
+function sendTelegramMessage(env, fetchImpl, chatId, text) {
+  // The bot token rides only in this URL, straight to Telegram — it must
+  // never be logged or included in any error surface.
+  return fetchImpl(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text })
+  });
+}
 
 // Invite tokens are DB-generated hex (48 chars by default); accepting 16..64
 // hex keeps room for other lengths while a malformed token can short-circuit
@@ -147,15 +202,29 @@ async function seedOrganization(env, fetchImpl, { orgId, ownerId, ownerName }) {
   });
   // webhook_token is set explicitly: the DB default only fires when the
   // column is absent from the insert payload, and this insert names it.
-  await sbPost(env, fetchImpl, `integrations?${new URLSearchParams({ on_conflict: "org_id,kind" })}`, {
-    headers: { prefer: "resolution=ignore-duplicates" },
-    body: [...TELEPHONY_KINDS].map((kind) => ({
-      org_id: orgId,
-      kind,
-      enabled: true,
-      webhook_token: randomHex(24)
-    }))
-  });
+  //
+  // Until migration 0004 lands, the DB CHECK on integrations.kind admits only
+  // the legacy two providers — and a CHECK violation fails the WHOLE bulk
+  // insert, which would kill org signup outright. So: try all five, and on a
+  // kind-check violation fall back to the legacy pair. Orgs created during
+  // that window get the missing rows on their first visit to the telephony
+  // settings after 0004 (the cabinet shows them as «ждёт миграции»).
+  const seedIntegrations = (kinds) =>
+    sbPost(env, fetchImpl, `integrations?${new URLSearchParams({ on_conflict: "org_id,kind" })}`, {
+      headers: { prefer: "resolution=ignore-duplicates" },
+      body: kinds.map((kind) => ({
+        org_id: orgId,
+        kind,
+        enabled: true,
+        webhook_token: randomHex(24)
+      }))
+    });
+  try {
+    await seedIntegrations([...TELEPHONY_KINDS]);
+  } catch (error) {
+    if (!/kind_check|_400|check constraint/i.test(String(error?.message))) throw error;
+    await seedIntegrations(["ringostat", "binotel"]);
+  }
   await sbPost(env, fetchImpl, "audit_log", {
     body: { org_id: orgId, actor_id: ownerId, action: "org.created", target: orgId }
   });
@@ -194,6 +263,10 @@ function zoneOffsetMinutes(timeZone, at) {
 // Ringostat sends JSON or form-urlencoded depending on the account's webhook
 // settings; Binotel sends JSON. Parse both into one plain object.
 async function readWebhookBody(request) {
+  // Same header-first discipline as the recordings endpoint: don't buffer a
+  // multi-megabyte body only to throw it away at the 64KB text cap below.
+  const declaredLength = Number(request.headers.get("content-length") || 0);
+  if (declaredLength > 64_000) return null;
   const text = await request.text().catch(() => "");
   if (!text) return {};
   // Real PBX payloads are well under 10KB; anything bigger is abuse or a
@@ -289,7 +362,7 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
 
   async function loadOrg(orgId) {
     const rows = await sbGet(env, fetchImpl, `organizations?${sbEq({ id: orgId }, {
-      select: "id,monthly_call_quota,timezone,ai_provider,ai_model",
+      select: "id,name,monthly_call_quota,timezone,ai_provider,ai_model",
       limit: "1"
     })}`);
     return rows?.[0] || null;
@@ -318,7 +391,31 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
           "organization:organizations(id,name,slug,plan,monthly_call_quota,timezone,ai_provider,ai_model)"
       }
     )}`);
-    return json({ user, memberships: rows || [] });
+    const memberships = rows || [];
+
+    // avg_deal_amount / ui_language arrive with migration 0004. Fetched in a
+    // SEPARATE query on purpose: naming a missing column inside the embedded
+    // select above would fail the WHOLE /me read in PostgREST, so the extras
+    // are merged best-effort and simply absent on a pre-0004 database.
+    const orgIds = [...new Set(memberships.map((m) => m.org_id).filter(Boolean))];
+    if (orgIds.length) {
+      try {
+        const params = new URLSearchParams({ select: "id,avg_deal_amount,ui_language" });
+        params.set("id", `in.(${orgIds.join(",")})`);
+        const extras = await sbGet(env, fetchImpl, `organizations?${params}`);
+        const byId = new Map((extras || []).map((row) => [row.id, row]));
+        for (const membership of memberships) {
+          const extra = byId.get(membership.org_id);
+          if (extra && membership.organization) {
+            membership.organization.avg_deal_amount = extra.avg_deal_amount ?? null;
+            membership.organization.ui_language = extra.ui_language ?? null;
+          }
+        }
+      } catch (_) {
+        // columns not migrated yet — the cabinet falls back to its defaults
+      }
+    }
+    return json({ user, memberships });
   }
 
   async function analyze(request, orgId, user, membership) {
@@ -377,13 +474,34 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
       return json({ error: "quota_exceeded" }, 429);
     }
 
+    const stage = await runAnalysisStage({
+      orgId,
+      actorId: user.id,
+      org,
+      call,
+      transcriptText: transcript.text,
+      checklist,
+      apiKey,
+      period
+    });
+    if (stage.failed) return stage.failed;
+    return json({ ok: true, analysis: stage.result });
+  }
+
+  // Shared tail of the analysis pipeline for both /analyze and /recordings:
+  // run the model, persist the result, count tokens, notify Telegram. `stt`
+  // (recordings only) carries the already-spent STT token counts and switches
+  // the failure path: the transcript is saved and PAID FOR, so the call stays
+  // `transcribed` instead of `failed` and a plain analyze retry costs no
+  // second transcription.
+  async function runAnalysisStage({ orgId, actorId, org, call, transcriptText, checklist, apiKey, period, stt = null }) {
     let result;
     try {
       result = await analyzeCall({
         provider: org.ai_provider,
         apiKey,
         model: org.ai_model || undefined,
-        transcript: transcript.text,
+        transcript: transcriptText,
         checklist: { items: checklist.items || [] },
         context: {
           managerName: call.manager_label,
@@ -395,11 +513,16 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     } catch (error) {
       const message = String(error?.message || error);
       // Best-effort bookkeeping: the caller still needs the 502 even if one
-      // of these writes fails, hence allSettled and no rethrow.
+      // of these writes fails, hence allSettled and no rethrow. The reserved
+      // slot is released either way; STT tokens (if any) stay counted.
       await Promise.allSettled([
-        shiftUsage(env, fetchImpl, orgId, period, { calls: -1 }),
-        sbPatch(env, fetchImpl, `calls?${sbEq({ id: callId, org_id: orgId })}`, {
-          body: { status: "failed", error: message.slice(0, 300) }
+        shiftUsage(env, fetchImpl, orgId, period, {
+          calls: -1,
+          tokensIn: stt?.tokensIn || 0,
+          tokensOut: stt?.tokensOut || 0
+        }),
+        sbPatch(env, fetchImpl, `calls?${sbEq({ id: call.id, org_id: orgId })}`, {
+          body: { status: stt ? "transcribed" : "failed", error: message.slice(0, 300) }
         }),
         sbPatch(env, fetchImpl, `org_ai_keys?${sbEq({ org_id: orgId, provider: org.ai_provider })}`, {
           body: { last_error: message.slice(0, 300) }
@@ -407,20 +530,20 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
         sbPost(env, fetchImpl, "audit_log", {
           body: {
             org_id: orgId,
-            actor_id: user.id,
+            actor_id: actorId,
             action: "call.analyze_failed",
-            target: callId,
+            target: call.id,
             meta: { error: message.slice(0, 200) }
           }
         })
       ]);
-      return json({ error: "analysis_failed", detail: message.slice(0, 200) }, 502);
+      return { failed: json({ error: "analysis_failed", detail: message.slice(0, 200) }, 502) };
     }
 
     await sbPost(env, fetchImpl, "analyses", {
       body: {
         org_id: orgId,
-        call_id: callId,
+        call_id: call.id,
         checklist_id: checklist.id,
         score: result.score,
         findings: result,
@@ -430,13 +553,14 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
         tokens_out: result.tokensOut
       }
     });
-    await sbPatch(env, fetchImpl, `calls?${sbEq({ id: callId, org_id: orgId })}`, {
+    await sbPatch(env, fetchImpl, `calls?${sbEq({ id: call.id, org_id: orgId })}`, {
       body: { status: "analyzed", error: null }
     });
-    // The call slot was reserved before the provider ran; add the tokens now.
+    // The call slot was reserved before the provider ran; add the tokens now
+    // (STT tokens included — one slot covers the whole call).
     await shiftUsage(env, fetchImpl, orgId, period, {
-      tokensIn: result.tokensIn || 0,
-      tokensOut: result.tokensOut || 0
+      tokensIn: (result.tokensIn || 0) + (stt?.tokensIn || 0),
+      tokensOut: (result.tokensOut || 0) + (stt?.tokensOut || 0)
     });
     await sbPatch(env, fetchImpl, `org_ai_keys?${sbEq({ org_id: orgId, provider: org.ai_provider })}`, {
       body: { last_ok_at: new Date().toISOString(), last_error: null }
@@ -444,14 +568,282 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     await sbPost(env, fetchImpl, "audit_log", {
       body: {
         org_id: orgId,
-        actor_id: user.id,
+        actor_id: actorId,
         action: "call.analyzed",
-        target: callId,
+        target: call.id,
         meta: { score: result.score, tokens_in: result.tokensIn, tokens_out: result.tokensOut }
       }
     });
 
-    return json({ ok: true, analysis: result });
+    // Best-effort per-call Telegram ping — a Telegram outage must never fail
+    // an analysis that already succeeded and was persisted.
+    await notifyPerCallRecipients({
+      orgId,
+      orgName: org.name,
+      managerLabel: call.manager_label,
+      result
+    }).catch(() => {});
+
+    return { result };
+  }
+
+  // Per-call Telegram notification. Deliberately transcript-free: the chat
+  // sees who called and the verdict, never a word of the conversation.
+  // Silently off when the bot token is absent or telegram_recipients has not
+  // been migrated yet (0004).
+  async function notifyPerCallRecipients({ orgId, orgName, managerLabel, result }) {
+    if (!env.TELEGRAM_BOT_TOKEN) return;
+
+    let recipients;
+    try {
+      recipients = await sbGet(env, fetchImpl, `telegram_recipients?${sbEq(
+        { org_id: orgId, kind: "per_call" },
+        { select: "chat_id" }
+      )}`);
+    } catch (_) {
+      return; // table missing (pre-0004) or unreadable — feature silently off
+    }
+    if (!Array.isArray(recipients) || !recipients.length) return;
+
+    const severityRank = { high: 0, medium: 1, low: 2 };
+    const topLeak = (result.leaks || [])
+      .slice()
+      .sort((a, b) => (severityRank[a.severity] ?? 3) - (severityRank[b.severity] ?? 3))[0];
+
+    const text = [
+      `📞 ${orgName || "CallControl"}: звонок разобран`,
+      `Менеджер: ${managerLabel || "не назначен"}`,
+      `Оценка: ${result.score}/100`,
+      // Model-generated free text is length-capped: transcript-driven prompt
+      // injection must not turn a Telegram ping into a billboard.
+      topLeak ? `Главная утечка: ${String(topLeak.title).slice(0, 120)}` : "Утечек не найдено",
+      result.next_step?.present
+        ? `Следующий шаг: ${String(result.next_step.detail).slice(0, 160)}`
+        : "Следующий шаг: не зафиксирован"
+    ].join("\n").slice(0, 3900);
+
+    await Promise.allSettled(
+      recipients.map((row) => sendTelegramMessage(env, fetchImpl, row.chat_id, text))
+    );
+  }
+
+  // POST /recordings: audio in -> STT (Gemini) -> the same analysis pipeline
+  // as /analyze. ONE quota slot covers both stages of one call. Failures are
+  // staged: STT fail = call `failed` + 502 transcription_failed; analysis
+  // fail = transcript SAVED, call `transcribed`, 502 analysis_failed — the
+  // caller retries plain /analyze without paying for STT again.
+  async function uploadRecording(request, orgId, user, membership) {
+    if (membership.role === "viewer") return json({ error: "forbidden" }, 403);
+
+    // Reject on the header BEFORE buffering: the base64 cap alone cannot stop
+    // request.json() from allocating a ~100MB body first. ~27MB of JSON wraps
+    // the 20M-char base64 budget with room for the envelope.
+    const declaredLength = Number(request.headers.get("content-length") || 0);
+    if (declaredLength > 27_000_000) return json({ error: "audio_too_large" }, 413);
+
+    const body = await request.json().catch(() => null);
+    if (!body) return json({ error: "bad_request" }, 400);
+
+    const mime = String(body.mime || "");
+    if (!RECORDING_MIMES.has(mime)) return json({ error: "bad_mime" }, 400);
+
+    const audioB64 = typeof body.audio_b64 === "string" ? body.audio_b64 : "";
+    if (!audioB64) return json({ error: "audio_required" }, 400);
+    if (audioB64.length > MAX_AUDIO_B64_CHARS) return json({ error: "audio_too_large" }, 413);
+
+    const callId = body.call_id ? String(body.call_id) : null;
+    if (callId && !UUID_RE.test(callId)) return json({ error: "bad_call_id" }, 400);
+
+    const direction = RECORDING_DIRECTIONS.has(body.direction) ? body.direction : "unknown";
+
+    const org = await loadOrg(orgId);
+    if (!org) return json({ error: "org_not_found" }, 404);
+
+    // Same manager rules as the cabinet's manual upload (NewCallModal):
+    // a manager always uploads for themself; owner/admin/lead may assign any
+    // active non-viewer member; a lead only within their own department, and
+    // the lead's calls always live in the lead's department.
+    const requestedManagerId = body.manager_id ? String(body.manager_id) : null;
+    if (requestedManagerId && !UUID_RE.test(requestedManagerId)) {
+      return json({ error: "bad_manager_id" }, 400);
+    }
+    let manager = null;
+    let departmentId = null;
+    if (membership.role === "manager") {
+      manager = membership;
+      departmentId = membership.department_id || null;
+    } else if (requestedManagerId) {
+      const member = (await sbGet(env, fetchImpl, `memberships?${sbEq(
+        { org_id: orgId, user_id: requestedManagerId, status: "active" },
+        { select: "user_id,role,full_name,department_id", limit: "1" }
+      )}`))?.[0];
+      // Unknown member, a viewer and a cross-department pick by a lead all
+      // collapse into one answer — no membership oracle for lower roles.
+      if (!member || member.role === "viewer") return json({ error: "bad_manager_id" }, 400);
+      if (
+        membership.role === "lead" &&
+        (member.department_id ?? null) !== (membership.department_id ?? null)
+      ) {
+        return json({ error: "bad_manager_id" }, 400);
+      }
+      manager = member;
+      departmentId = member.department_id || null;
+    }
+    if (membership.role === "lead") departmentId = membership.department_id || null;
+
+    // org_id in the filter as well as id: a foreign call must be
+    // indistinguishable from a missing one.
+    let call = null;
+    if (callId) {
+      call = (await sbGet(env, fetchImpl, `calls?${sbEq(
+        { id: callId, org_id: orgId },
+        { select: "id,org_id,manager_id,department_id,manager_label,direction,duration_sec,status", limit: "1" }
+      )}`))?.[0];
+      if (!call) return json({ error: "call_not_found" }, 404);
+      // Re-uploading audio REPLACES the call's transcript and re-scores it —
+      // that must not be a peer-sabotage vector. Managers may only touch
+      // their own calls, leads only their department's; the refusal is the
+      // same opaque 404 as a foreign call, so no ownership oracle appears.
+      if (membership.role === "manager" && call.manager_id !== user.id) {
+        return json({ error: "call_not_found" }, 404);
+      }
+      if (
+        membership.role === "lead" &&
+        (call.department_id ?? null) !== (membership.department_id ?? null)
+      ) {
+        return json({ error: "call_not_found" }, 404);
+      }
+    }
+
+    const checklist = (await sbGet(env, fetchImpl, `checklists?${sbEq(
+      { org_id: orgId, is_default: "true" },
+      { select: "id,items", limit: "1" }
+    )}`))?.[0];
+    if (!checklist) return json({ error: "no_checklist" }, 409);
+
+    // STT runs on Gemini only; the analysis stage uses whatever provider the
+    // org chose. When they differ BOTH keys must exist before money moves.
+    const analysisKeyRow = (await sbGet(env, fetchImpl, `org_ai_keys?${sbEq(
+      { org_id: orgId, provider: org.ai_provider },
+      { select: "id,key_ciphertext", limit: "1" }
+    )}`))?.[0];
+    if (!analysisKeyRow) return json({ error: "ai_key_missing" }, 409);
+
+    let sttKeyRow = analysisKeyRow;
+    if (org.ai_provider !== "gemini") {
+      sttKeyRow = (await sbGet(env, fetchImpl, `org_ai_keys?${sbEq(
+        { org_id: orgId, provider: "gemini" },
+        { select: "id,key_ciphertext", limit: "1" }
+      )}`))?.[0];
+      if (!sttKeyRow) return json({ error: "ai_key_missing", detail: "stt_requires_gemini_key" }, 409);
+    }
+
+    // Plaintext keys exist only inside this call frame.
+    const apiKey = await decryptSecret(analysisKeyRow.key_ciphertext, env.ORG_SECRET_KEY);
+    const sttKey = sttKeyRow === analysisKeyRow
+      ? apiKey
+      : await decryptSecret(sttKeyRow.key_ciphertext, env.ORG_SECRET_KEY);
+
+    // ONE reserved slot covers STT + analysis of this call.
+    const period = `${new Date().toISOString().slice(0, 7)}-01`;
+    if (!(await reserveQuotaSlot(env, fetchImpl, orgId, period, org.monthly_call_quota))) {
+      return json({ error: "quota_exceeded" }, 429);
+    }
+
+    let stt;
+    try {
+      stt = await transcribeAudio({
+        provider: "gemini",
+        apiKey: sttKey,
+        // The org's chosen model is a Gemini one only when the org runs on
+        // Gemini; otherwise the STT default applies.
+        model: org.ai_provider === "gemini" ? org.ai_model || undefined : undefined,
+        audioB64,
+        mime,
+        fetchImpl
+      });
+    } catch (error) {
+      const message = String(error?.message || error);
+      await Promise.allSettled([
+        // Nothing was transcribed — refund the slot.
+        shiftUsage(env, fetchImpl, orgId, period, { calls: -1 }),
+        callId
+          ? sbPatch(env, fetchImpl, `calls?${sbEq({ id: callId, org_id: orgId })}`, {
+              body: { status: "failed", error: message.slice(0, 300) }
+            })
+          : Promise.resolve(),
+        sbPost(env, fetchImpl, "audit_log", {
+          body: {
+            org_id: orgId,
+            actor_id: user.id,
+            action: "call.transcribe_failed",
+            target: callId,
+            meta: { error: message.slice(0, 200) }
+          }
+        })
+      ]);
+      return json({ error: "transcription_failed", detail: message.slice(0, 200) }, 502);
+    }
+
+    try {
+      if (!call) {
+        const inserted = await sbPost(env, fetchImpl, "calls", {
+          headers: { prefer: "return=representation" },
+          body: {
+            org_id: orgId,
+            source: "upload",
+            external_id: `upload-${crypto.randomUUID()}`,
+            direction,
+            manager_id: manager?.user_id || null,
+            manager_label: manager?.full_name || null,
+            department_id: departmentId,
+            started_at: new Date().toISOString(),
+            status: "transcribed"
+          }
+        });
+        call = inserted?.[0];
+        if (!call?.id) throw new Error("call_insert_failed");
+      }
+      // Upsert on call_id: re-uploading audio for an existing call replaces
+      // its transcript instead of tripping the unique index.
+      await sbPost(env, fetchImpl, `transcripts?${new URLSearchParams({ on_conflict: "call_id" })}`, {
+        headers: { prefer: "resolution=merge-duplicates" },
+        body: { org_id: orgId, call_id: call.id, text: stt.text, lang: stt.lang, provider: "gemini-audio" }
+      });
+      if (callId) {
+        await sbPatch(env, fetchImpl, `calls?${sbEq({ id: call.id, org_id: orgId })}`, {
+          body: { status: "transcribed", error: null }
+        });
+      }
+    } catch (error) {
+      // The transcript could not be stored: refund the slot but keep the STT
+      // tokens on the books — the provider call did happen and cost money.
+      await shiftUsage(env, fetchImpl, orgId, period, {
+        calls: -1,
+        tokensIn: stt.tokensIn || 0,
+        tokensOut: stt.tokensOut || 0
+      }).catch(() => {});
+      throw error;
+    }
+
+    const stage = await runAnalysisStage({
+      orgId,
+      actorId: user.id,
+      org,
+      call: {
+        id: call.id,
+        manager_label: call.manager_label ?? manager?.full_name ?? null,
+        direction: call.direction || direction,
+        duration_sec: call.duration_sec ?? null
+      },
+      transcriptText: stt.text,
+      checklist,
+      apiKey,
+      period,
+      stt: { tokensIn: stt.tokensIn || 0, tokensOut: stt.tokensOut || 0 }
+    });
+    if (stage.failed) return stage.failed;
+    return json({ ok: true, call_id: call.id, analysis: stage.result });
   }
 
   async function getAiKey(orgId, membership) {
@@ -606,6 +998,204 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
       webhook_path: `/api/telephony/${row.kind}/${row.webhook_token}`,
       last_event_at: row.last_event_at
     })));
+  }
+
+  // --- integration credentials (API keys for pull-based PBX APIs) ----------
+
+  // Field name whitelist: short identifier-ish keys. Values are provider API
+  // credentials — encrypted as one JSON blob into integration_secrets, which
+  // has NO PostgREST policies (service-only) on top of the encryption.
+  const CREDENTIAL_KEY_RE = /^[a-z0-9_.-]{1,64}$/i;
+
+  async function getIntegrationCredentials(orgId, membership, kind) {
+    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+    if (!credentialKinds().has(kind)) return json({ error: "unknown_kind" }, 404);
+
+    const integration = (await sbGet(env, fetchImpl, `integrations?${sbEq(
+      { org_id: orgId, kind },
+      { select: "id", limit: "1" }
+    )}`))?.[0];
+    if (!integration) return json({ error: "integration_not_found" }, 404);
+
+    const secret = (await sbGet(env, fetchImpl, `integration_secrets?${sbEq(
+      { integration_id: integration.id },
+      { select: "secret_ciphertext", limit: "1" }
+    )}`))?.[0];
+    if (!secret) return json({ configured: false, field_names: [] });
+
+    // Field NAMES only, decrypted in this frame and immediately reduced to
+    // keys. The values themselves never leave the worker in any response.
+    let fieldNames = [];
+    try {
+      const fields = JSON.parse(await decryptSecret(secret.secret_ciphertext, env.ORG_SECRET_KEY));
+      fieldNames = Object.keys(fields || {});
+    } catch (_) {
+      // undecryptable/legacy blob — still configured, names unknown
+    }
+    return json({ configured: true, field_names: fieldNames });
+  }
+
+  async function putIntegrationCredentials(request, orgId, user, membership, kind) {
+    // Provider credentials are the client's PBX account — owner only, like
+    // the AI key.
+    if (membership.role !== "owner") return json({ error: "forbidden" }, 403);
+    if (!credentialKinds().has(kind)) return json({ error: "unknown_kind" }, 404);
+
+    const body = await request.json().catch(() => null);
+    const fields = body?.fields;
+    if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
+      return json({ error: "bad_fields" }, 400);
+    }
+    const entries = Object.entries(fields);
+    if (!entries.length || entries.length > 12) return json({ error: "bad_fields" }, 400);
+    const clean = {};
+    for (const [key, value] of entries) {
+      if (!CREDENTIAL_KEY_RE.test(key) || typeof value !== "string") {
+        return json({ error: "bad_fields" }, 400);
+      }
+      const trimmed = value.trim();
+      if (!trimmed || trimmed.length > 500) return json({ error: "bad_fields" }, 400);
+      clean[key] = trimmed;
+    }
+
+    // The integrations row must already exist (seeded at onboarding or by a
+    // later migration) — secrets never dangle without their integration.
+    const integration = (await sbGet(env, fetchImpl, `integrations?${sbEq(
+      { org_id: orgId, kind },
+      { select: "id", limit: "1" }
+    )}`))?.[0];
+    if (!integration) return json({ error: "integration_not_found" }, 404);
+
+    const ciphertext = await encryptSecret(JSON.stringify(clean), env.ORG_SECRET_KEY);
+    await sbPost(env, fetchImpl, `integration_secrets?${new URLSearchParams({
+      on_conflict: "integration_id"
+    })}`, {
+      headers: { prefer: "resolution=merge-duplicates" },
+      body: { integration_id: integration.id, org_id: orgId, secret_ciphertext: ciphertext }
+    });
+    // Field NAMES only — the audit trail must never see credential values.
+    await sbPost(env, fetchImpl, "audit_log", {
+      body: {
+        org_id: orgId,
+        actor_id: user.id,
+        action: "integration.credentials_set",
+        target: kind,
+        meta: { kind, fields: Object.keys(clean) }
+      }
+    });
+    return json({ ok: true, field_names: Object.keys(clean) });
+  }
+
+  // --- telegram recipients (arrives with migration 0004) -------------------
+
+  async function getTelegramRecipients(orgId, membership) {
+    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+    try {
+      const rows = await sbGet(env, fetchImpl, `telegram_recipients?${sbEq(
+        { org_id: orgId },
+        { select: "id,chat_id,kind,label,created_at" }
+      )}`);
+      return json({ recipients: rows || [] });
+    } catch (error) {
+      if (isMissingTableError(error)) return json({ error: "migration_required" }, 503);
+      throw error;
+    }
+  }
+
+  async function putTelegramRecipients(request, orgId, user, membership) {
+    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+
+    const body = await request.json().catch(() => null);
+    const list = Array.isArray(body?.recipients) ? body.recipients : null;
+    if (!list) return json({ error: "bad_recipients" }, 400);
+    if (list.length > MAX_TELEGRAM_RECIPIENTS) return json({ error: "too_many_recipients" }, 400);
+
+    const rows = [];
+    for (const item of list) {
+      const chatId = String(item?.chat_id ?? "").trim();
+      const kind = String(item?.kind || "");
+      if (!TELEGRAM_CHAT_ID_RE.test(chatId)) return json({ error: "bad_chat_id" }, 400);
+      if (!TELEGRAM_RECIPIENT_KINDS.has(kind)) return json({ error: "bad_kind" }, 400);
+      rows.push({
+        org_id: orgId,
+        chat_id: chatId,
+        kind,
+        label: String(item?.label || "").trim().slice(0, 120) || null
+      });
+    }
+    // Dedupe by the unique key: a duplicate pair from the client must not be
+    // able to fail the insert AFTER the delete already emptied the set (the
+    // on_conflict=ignore-duplicates below is the second layer of the same
+    // guarantee).
+    const seen = new Set();
+    const deduped = rows.filter((row) => {
+      const key = `${row.chat_id}:${row.kind}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    try {
+      // PUT is a full replace: drop the org's set, then insert the new one.
+      await sbRequestDelete(env, fetchImpl, `telegram_recipients?${sbEq({ org_id: orgId })}`);
+      if (deduped.length) await sbPost(env, fetchImpl, `telegram_recipients?${new URLSearchParams({
+      on_conflict: "org_id,chat_id,kind"
+    })}`, {
+      headers: { prefer: "resolution=ignore-duplicates" }, body: deduped });
+    } catch (error) {
+      if (isMissingTableError(error)) return json({ error: "migration_required" }, 503);
+      throw error;
+    }
+    // Counts and kinds only — chat ids are semi-private routing data.
+    await sbPost(env, fetchImpl, "audit_log", {
+      body: {
+        org_id: orgId,
+        actor_id: user.id,
+        action: "org.telegram_recipients_set",
+        meta: { count: rows.length }
+      }
+    });
+    return json({ ok: true, count: rows.length });
+  }
+
+  // --- org settings (columns arrive with migration 0004) -------------------
+
+  async function putOrgSettings(request, orgId, user, membership) {
+    if (membership.role !== "owner") return json({ error: "forbidden" }, 403);
+
+    const body = await request.json().catch(() => null);
+    if (!body || !("avg_deal_amount" in body)) return json({ error: "bad_request" }, 400);
+
+    let value = null;
+    if (body.avg_deal_amount !== null) {
+      if (
+        typeof body.avg_deal_amount !== "number" ||
+        !Number.isFinite(body.avg_deal_amount) ||
+        body.avg_deal_amount < 0 ||
+        body.avg_deal_amount > 1e12
+      ) {
+        return json({ error: "bad_avg_deal_amount" }, 400);
+      }
+      value = body.avg_deal_amount;
+    }
+
+    try {
+      await sbPatch(env, fetchImpl, `organizations?${sbEq({ id: orgId })}`, {
+        body: { avg_deal_amount: value }
+      });
+    } catch (error) {
+      if (isMissingColumnError(error)) return json({ error: "migration_required" }, 503);
+      throw error;
+    }
+    await sbPost(env, fetchImpl, "audit_log", {
+      body: {
+        org_id: orgId,
+        actor_id: user.id,
+        action: "org.settings_updated",
+        meta: { avg_deal_amount: value }
+      }
+    });
+    return json({ ok: true });
   }
 
   // --- onboarding: invites & self-serve org creation -----------------------
@@ -893,11 +1483,19 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     // Token miss, kind mismatch and a DISABLED integration all look identical
     // from outside — no oracle, and `enabled` is the only kill switch for a
     // leaked webhook URL (there is no token-rotation route yet).
+    //
+    // Binotel note, INTENDED: these drop paths answer 404 {ok:false}, not the
+    // {"status":"success"} ack, so Binotel retries ~7 times over 38h. For a
+    // mistyped URL that retry pressure is a feature (the customer notices);
+    // for a deliberately disabled integration the redeliveries die out after
+    // 38h and nothing is stored meanwhile.
     if (!integration || integration.enabled !== true) return json({ ok: false }, 404);
 
     const body = await readWebhookBody(request);
     if (body === null) return json({ ok: false }, 413);
-    if (!isCompletedCallEvent(kind, body)) return json({ ok: true, ignored: true });
+    if (!isCompletedCallEvent(kind, body)) {
+      return kind === "binotel" ? json({ status: "success", ignored: true }) : json({ ok: true, ignored: true });
+    }
 
     const org = (await sbGet(env, fetchImpl, `organizations?${sbEq(
       { id: integration.org_id },
@@ -917,7 +1515,7 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     } catch (_) {
       // A completed event with no call id can never be stored; acknowledge
       // it so the vendor stops redelivering a payload that will never parse.
-      return json({ ok: true, ignored: true });
+      return kind === "binotel" ? json({ status: "success", ignored: true }) : json({ ok: true, ignored: true });
     }
 
     const members = (await sbGet(env, fetchImpl, `memberships?${sbEq(
@@ -961,7 +1559,14 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
       body: { last_event_at: new Date().toISOString() }
     });
 
-    return json({ ok: true });
+    return webhookAck(kind);
+  }
+
+  // Binotel's doc requires the literal body {"status":"success"} — any other
+  // answer makes it redeliver 7 times over 38 hours. Everyone else gets the
+  // house shape.
+  function webhookAck(kind) {
+    return kind === "binotel" ? json({ status: "success" }) : json({ ok: true });
   }
 
   // --- dispatch ------------------------------------------------------------
@@ -995,11 +1600,23 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     if (!membership) return json({ error: "not_a_member" }, 403);
 
     if (rest === "analyze" && method === "POST") return analyze(request, orgId, user, membership);
+    if (rest === "recordings" && method === "POST") return uploadRecording(request, orgId, user, membership);
     if (rest === "ai-key" && method === "GET") return getAiKey(orgId, membership);
     if (rest === "ai-key" && method === "PUT") return putAiKey(request, orgId, user, membership);
     if (rest === "members" && method === "GET") return listMembers(orgId);
     if (rest === "members" && method === "POST") return addMember(request, orgId, user, membership);
     if (rest === "integrations" && method === "GET") return listIntegrations(orgId, membership);
+    if (rest === "telegram" && method === "GET") return getTelegramRecipients(orgId, membership);
+    if (rest === "telegram" && method === "PUT") return putTelegramRecipients(request, orgId, user, membership);
+    if (rest === "org-settings" && method === "PUT") return putOrgSettings(request, orgId, user, membership);
+
+    const credentialsMatch = rest.match(/^integrations\/([a-z0-9_-]{1,32})\/credentials$/);
+    if (credentialsMatch && method === "GET") {
+      return getIntegrationCredentials(orgId, membership, credentialsMatch[1]);
+    }
+    if (credentialsMatch && method === "PUT") {
+      return putIntegrationCredentials(request, orgId, user, membership, credentialsMatch[1]);
+    }
     return json({ error: "not_found" }, 404);
   }
 
@@ -1025,4 +1642,100 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
   }
 
   return { handle };
+}
+
+// ---------------------------------------------------------------------------
+// Daily digest (cron entry — see wrangler.toml [triggers] and the scheduled
+// handler in cloudflare-worker.example.js)
+// ---------------------------------------------------------------------------
+
+function buildDigestMessage(orgName, analyses) {
+  const header = `📊 ${orgName} — звонки за вчера`;
+  if (!analyses.length) return `${header}\nПроанализированных звонков не было.`;
+
+  const scoreOf = (analysis) => Number(analysis?.score) || 0;
+  const managerOf = (analysis) => analysis?.call?.manager_label || "без менеджера";
+  const average = Math.round(analyses.reduce((sum, a) => sum + scoreOf(a), 0) / analyses.length);
+  const best = analyses.reduce((acc, a) => (acc === null || scoreOf(a) > scoreOf(acc) ? a : acc), null);
+  const worst = analyses.reduce((acc, a) => (acc === null || scoreOf(a) < scoreOf(acc) ? a : acc), null);
+
+  const perManager = new Map();
+  for (const analysis of analyses) {
+    const name = managerOf(analysis);
+    const entry = perManager.get(name) || { sum: 0, count: 0 };
+    entry.sum += scoreOf(analysis);
+    entry.count += 1;
+    perManager.set(name, entry);
+  }
+  const ranking = [...perManager.entries()]
+    .map(([name, { sum, count }]) => ({ name, avg: Math.round(sum / count), count }))
+    .sort((a, b) => b.avg - a.avg)
+    .slice(0, 3);
+
+  return [
+    header,
+    `Проанализировано: ${analyses.length}`,
+    `Средний балл: ${average}/100`,
+    `Лучший звонок: ${scoreOf(best)}/100 — ${managerOf(best)}`,
+    `Худший звонок: ${scoreOf(worst)}/100 — ${managerOf(worst)}`,
+    "Менеджеры:",
+    ...ranking.map((row, index) => `${index + 1}. ${row.name} — ${row.avg}/100 (${row.count} зв.)`)
+  ].join("\n").slice(0, 3900);
+}
+
+// Yesterday's (UTC day) per-org digest to every `daily` Telegram recipient.
+// Runs entirely on the service key — there is no user in a cron. A missing
+// telegram_recipients table (migration 0004 not applied) makes the whole run
+// a silent no-op, as does a missing bot token.
+export async function dailyDigest(env, fetchImpl = fetch) {
+  if (!env?.TELEGRAM_BOT_TOKEN || !env?.SUPABASE_URL || !env?.SUPABASE_SECRET_KEY) return;
+
+  let recipients;
+  try {
+    recipients = await sbGet(env, fetchImpl, `telegram_recipients?${sbEq(
+      { kind: "daily" },
+      { select: "org_id,chat_id" }
+    )}`);
+  } catch (_) {
+    return; // pre-0004 database or Supabase down — nothing to send
+  }
+  if (!Array.isArray(recipients) || !recipients.length) return;
+
+  const chatsByOrg = new Map();
+  for (const row of recipients) {
+    if (!row?.org_id || !row?.chat_id) continue;
+    if (!chatsByOrg.has(row.org_id)) chatsByOrg.set(row.org_id, []);
+    chatsByOrg.get(row.org_id).push(row.chat_id);
+  }
+  if (!chatsByOrg.size) return;
+
+  // Yesterday as a whole UTC day: [today 00:00Z - 24h, today 00:00Z).
+  const now = new Date();
+  const endMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const start = new Date(endMs - 86_400_000).toISOString();
+  const end = new Date(endMs).toISOString();
+
+  const orgParams = new URLSearchParams({ select: "id,name" });
+  orgParams.set("id", `in.(${[...chatsByOrg.keys()].join(",")})`);
+  const orgs = (await sbGet(env, fetchImpl, `organizations?${orgParams}`).catch(() => null)) || [];
+  const orgNames = new Map(orgs.map((org) => [org.id, org.name]));
+
+  for (const [orgId, chatIds] of chatsByOrg) {
+    try {
+      const params = new URLSearchParams({
+        select: "score,call_id,call:calls(manager_label)",
+        org_id: `eq.${orgId}`
+      });
+      params.append("created_at", `gte.${start}`);
+      params.append("created_at", `lt.${end}`);
+      const analyses = (await sbGet(env, fetchImpl, `analyses?${params}`)) || [];
+
+      const text = buildDigestMessage(orgNames.get(orgId) || "CallControl", analyses);
+      await Promise.allSettled(
+        chatIds.map((chatId) => sendTelegramMessage(env, fetchImpl, chatId, text))
+      );
+    } catch (_) {
+      // one broken org must not kill the other orgs' digests
+    }
+  }
 }

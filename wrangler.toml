@@ -12,3 +12,8 @@ not_found_handling = "single-page-application"
 # saas/worker/api.js registerOrg — only RLS-gated access, never privileged.
 [vars]
 SUPABASE_PUBLISHABLE_KEY = "sb_publishable_F4whCRaKdrKFBtv2kevG5A_tcM1k3iS"
+
+# Daily Telegram digest — 17:00 UTC (20:00 Kyiv in summer). Handled by the
+# scheduled() export in cloudflare-worker.example.js -> dailyDigest(env).
+[triggers]
+crons = ["0 17 * * *"]

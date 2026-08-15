@@ -11,7 +11,7 @@ import {
   checkKvRateLimit,
   corsHeadersFor
 } from "./lib/lead.js";
-import { createApi } from "./saas/worker/api.js";
+import { createApi, dailyDigest } from "./saas/worker/api.js";
 
 // SaaS cabinet + telephony webhooks (saas/worker/api.js). Created lazily on
 // the first request and kept for the isolate's lifetime so its auth token
@@ -45,6 +45,14 @@ export default {
     }
 
     return json({ ok: false, error: "not_found" }, 404, cors);
+  },
+
+  // Cron entry (wrangler.toml [triggers]): the daily Telegram digest. dailyDigest
+  // is a silent no-op without TELEGRAM_BOT_TOKEN or the telegram_recipients
+  // table; the catch keeps a partial Telegram/Supabase outage from surfacing
+  // as a failed cron run.
+  async scheduled(event, env, ctx) {
+    await dailyDigest(env).catch(() => {});
   }
 };
 
