@@ -53,6 +53,10 @@ run("node", ["--check", "build-pages.js"]);
 run("node", ["--check", "cloudflare-worker.example.js"]);
 run("node", ["--check", "generate-public-landing-live.js"]);
 run("node", ["build-pages.js"]);
+// build-pages wipes dist/ at its start, so the cabinet build must follow it
+// here exactly as it does in `npm run build` — otherwise this script deletes
+// the artifact it asserts on below.
+run("npx", ["vite", "build"]);
 
 assertIncludes("dist/index.html", "Аудит звонков отдела продаж за 5 рабочих дней");
 assertIncludes("dist/ru/index.html", "Аудит звонков отдела продаж за 5 рабочих дней");
@@ -195,6 +199,26 @@ for (const locale of ["uk", "ru", "en"]) {
   const pages = (bytes.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
   if (pages !== 1) {
     throw new Error(`${file} has ${pages} pages; a one-pager must be exactly 1`);
+  }
+}
+
+// Cabinet SPA: the vite build must land in dist/app, and the client bundle
+// must never contain server-side secret markers — the publishable key is fine
+// by design, the service key or org master key would be a full compromise.
+// NOTE: smoke runs after `npm run build`, which is build-pages THEN vite, so
+// dist/app existing here also proves the build order was respected.
+if (!fs.existsSync("dist/app/index.html")) {
+  throw new Error("dist/app/index.html missing — vite cabinet build did not run");
+}
+for (const file of fs.readdirSync("dist/app/assets")) {
+  for (const needle of ["service_role", "SUPABASE_SECRET", "ORG_SECRET"]) {
+    assertExcludes(`dist/app/assets/${file}`, needle);
+  }
+  // "sb_secret_" alone is a false positive: supabase-js ships that literal as
+  // its API-key prefix classifier. An actual key is the prefix plus payload.
+  const bundle = fs.readFileSync(`dist/app/assets/${file}`, "utf8");
+  if (/sb_secret_[A-Za-z0-9]{8,}/.test(bundle)) {
+    throw new Error(`dist/app/assets/${file} contains what looks like a real secret key`);
   }
 }
 

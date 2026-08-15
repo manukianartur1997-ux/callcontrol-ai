@@ -4,17 +4,25 @@
   "private": true,
   "description": "Tiny local backend for CallControl AI demo lead capture.",
   "scripts": {
-    "build": "node build-pages.js",
+    "build": "node build-pages.js && vite build",
     "start": "node server.js",
     "smoke": "node scripts/smoke-check.js",
-    "check": "node --check server.js && node --input-type=module --check < functions/api/leads.js && node --check cloudflare/src/worker.js && node --check saas/worker/ai.js && node --check saas/worker/crypto.js && node --check saas/worker/telephony.js",
-    "test:saas": "node --test saas/worker/*.test.js"
+    "check": "node --check server.js && node --input-type=module --check < functions/api/leads.js && node --check cloudflare/src/worker.js && node --check saas/worker/ai.js && node --check saas/worker/crypto.js && node --check saas/worker/telephony.js && node --check saas/worker/api.js && node --check saas/worker/auth.js && node --check saas/worker/supabase-rest.js",
+    "test:saas": "node --test saas/worker/*.test.js",
+    "build:cabinet": "vite build"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
     "dejavu-fonts-ttf": "^2.37.3",
-    "pdfkit": "^0.19.1"
+    "pdfkit": "^0.19.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.5",
+    "vite": "^8.2.1"
   }
 }
