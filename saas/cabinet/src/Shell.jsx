@@ -1,6 +1,8 @@
 // Application chrome: dark sidebar (top bar on narrow screens) + content
 // area. Navigation is plain <a href="#/..."> — the hash router picks it up.
+import { useState } from "react";
 import { copy } from "./copy.js";
+import { PasswordModal } from "./PasswordModal.jsx";
 
 // Gradient logo square, reused by Login. Pure CSS, no image assets.
 export function BrandMark() {
@@ -8,6 +10,7 @@ export function BrandMark() {
 }
 
 export function Shell({ me, active, route, onSwitchOrg, onSignOut, children }) {
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const canSettings = active.role === "owner" || active.role === "admin";
   const navItems = [
     { page: "dashboard", href: "#/", label: copy.nav.dashboard },
@@ -60,6 +63,13 @@ export function Shell({ me, active, route, onSwitchOrg, onSignOut, children }) {
             {copy.roles[active.role] || active.role}
             {active.full_name ? ` · ${me.user.email}` : ""}
           </div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm btn-signout"
+            onClick={() => setPasswordOpen(true)}
+          >
+            {copy.password.change}
+          </button>
           <button type="button" className="btn btn-ghost btn-sm btn-signout" onClick={onSignOut}>
             {copy.common.signOut}
           </button>
@@ -67,6 +77,8 @@ export function Shell({ me, active, route, onSwitchOrg, onSignOut, children }) {
       </aside>
 
       <main className="content">{children}</main>
+
+      {passwordOpen ? <PasswordModal onClose={() => setPasswordOpen(false)} /> : null}
     </div>
   );
 }

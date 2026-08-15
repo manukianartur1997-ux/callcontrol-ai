@@ -658,6 +658,11 @@ a {
   font-size: 14px;
 }
 
+.form-ok {
+  color: var(--green);
+  font-size: 14px;
+}
+
 .form-error-inline {
   color: var(--red);
   font-size: 12px;
