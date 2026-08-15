@@ -1495,3 +1495,42 @@ a {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* --------------------------------------------------------------- invites */
+
+.invite-block {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.invite-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.invite-form .input {
+  flex: 1;
+  min-width: 180px;
+}
+
+.invite-result {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.invite-link {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}

@@ -216,7 +216,92 @@ function TeamCard({ org }) {
       )}
 
       <AddMemberForm org={org} onAdded={reload} />
+      <InviteLinkBlock org={org} />
     </Card>
+  );
+}
+
+// Invite by link: an invites row via supabase-js (RLS grants owner/admin the
+// write), the DB generates the 48-hex token, and the link carries it. The
+// invitee opens /app/#/join/<token> and proves the email named here.
+function InviteLinkBlock({ org }) {
+  const t = copy.settings.invite;
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("manager");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const [link, setLink] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const roles = org.role === "owner" ? ["admin", "lead", "manager", "viewer"] : ["lead", "manager", "viewer"];
+
+  async function create(e) {
+    e.preventDefault();
+    setErr(null);
+    setLink(null);
+    setCopied(false);
+    if (!email.includes("@")) {
+      setErr(t.badEmail);
+      return;
+    }
+    setBusy(true);
+    const { data, error } = await supabase
+      .from("invites")
+      .insert({ org_id: org.org_id, email: email.trim(), role })
+      .select("token")
+      .single();
+    setBusy(false);
+    if (error) {
+      setErr(humanApiError(error));
+      return;
+    }
+    setLink(`${window.location.origin}/app/#/join/${data.token}`);
+  }
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+    } catch (_) {
+      // clipboard may be blocked — the link is selectable text either way
+    }
+  }
+
+  return (
+    <div className="invite-block">
+      <h3 className="sub-title">{t.title}</h3>
+      <p className="muted">{t.hint}</p>
+      <form onSubmit={create} className="invite-form">
+        <input
+          className="input"
+          type="email"
+          placeholder={t.emailPlaceholder}
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={busy}
+        />
+        <select className="input" value={role} onChange={(e) => setRole(e.target.value)} disabled={busy}>
+          {roles.map((r) => (
+            <option key={r} value={r}>
+              {copy.roles[r] || r}
+            </option>
+          ))}
+        </select>
+        <button type="submit" className="btn btn-primary" disabled={busy}>
+          {busy ? <Spinner small /> : t.submit}
+        </button>
+      </form>
+      {err ? <p className="form-error">{err}</p> : null}
+      {link ? (
+        <div className="invite-result">
+          <code className="invite-link">{link}</code>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={copyLink}>
+            {copied ? t.copied : t.copy}
+          </button>
+          <p className="muted">{t.expires}</p>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
