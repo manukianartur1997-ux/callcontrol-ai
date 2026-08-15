@@ -4,7 +4,7 @@
   "private": true,
   "description": "Tiny local backend for CallControl AI demo lead capture.",
   "scripts": {
-    "build": "node build-pages.js && vite build",
+    "build": "node build-pages.js",
     "start": "node server.js",
     "smoke": "node scripts/smoke-check.js",
     "check": "node --check server.js && node --input-type=module --check < functions/api/leads.js && node --check cloudflare/src/worker.js && node --check saas/worker/ai.js && node --check saas/worker/crypto.js && node --check saas/worker/telephony.js && node --check saas/worker/api.js && node --check saas/worker/auth.js && node --check saas/worker/supabase-rest.js",

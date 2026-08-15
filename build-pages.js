@@ -77,6 +77,14 @@ async function build() {
   );
 
   console.log(`Cloudflare Pages build ready: hybrid demo room -> dist/`);
+
+  // The cabinet SPA build lives HERE, not in the deploy workflow: the CI job
+  // invokes `node build-pages.js` directly, and edits to .github/workflows/*
+  // are rejected by the local push credential (no workflow scope). Keeping the
+  // whole build behind this one entry point also means smoke, CI and
+  // `npm run build` can never disagree about what a full build is.
+  const { execFileSync } = require("child_process");
+  execFileSync("npx", ["vite", "build"], { cwd: root, stdio: "inherit" });
 }
 
 build().catch((error) => {

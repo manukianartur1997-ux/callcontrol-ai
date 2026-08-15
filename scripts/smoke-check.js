@@ -52,11 +52,7 @@ function assertRealPdf(file) {
 run("node", ["--check", "build-pages.js"]);
 run("node", ["--check", "cloudflare-worker.example.js"]);
 run("node", ["--check", "generate-public-landing-live.js"]);
-run("node", ["build-pages.js"]);
-// build-pages wipes dist/ at its start, so the cabinet build must follow it
-// here exactly as it does in `npm run build` — otherwise this script deletes
-// the artifact it asserts on below.
-run("npx", ["vite", "build"]);
+run("node", ["build-pages.js"]); // includes the vite cabinet build
 
 assertIncludes("dist/index.html", "Аудит звонков отдела продаж за 5 рабочих дней");
 assertIncludes("dist/ru/index.html", "Аудит звонков отдела продаж за 5 рабочих дней");
