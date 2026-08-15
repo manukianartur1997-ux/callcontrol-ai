@@ -39,7 +39,9 @@ psql_run() {
 echo "==> supabase shim"
 psql_run /saas/test/00_supabase_shim.sql
 
-for f in "$SAAS_DIR"/migrations/*.sql; do
+# Numbered migrations only: ALL_IN_ONE.sql is the generated paste-bundle of
+# the same files and would re-apply everything on top of itself.
+for f in "$SAAS_DIR"/migrations/[0-9]*.sql; do
   echo "==> $(basename "$f")"
   psql_run "/saas/migrations/$(basename "$f")"
 done
