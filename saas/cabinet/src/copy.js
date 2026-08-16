@@ -339,6 +339,10 @@ const uk = {
     reanalyzing: "Аналізуємо…",
     reanalyzeConfirm:
       "Розібрати дзвінок заново? Поточний розбір буде замінено новим, це витратить токени.",
+    retryPipeline: "Повторити обробку",
+    retrying: "Запускаємо…",
+    retryConfirm:
+      "Повторно завантажити запис із АТС і розібрати дзвінок? Спробуйте після того, як додали ключі АТС/AI.",
     notFound: "Дзвінок не знайдено або у вас немає до нього доступу.",
     pendingTitle: "Дзвінок ще не розібрано",
     pendingText: "Він у черзі на аналіз — оновіть сторінку за хвилину.",
@@ -1090,6 +1094,10 @@ const ru = {
     reanalyzing: "Анализируем…",
     reanalyzeConfirm:
       "Разобрать звонок заново? Текущий разбор будет заменён новым, это потратит токены.",
+    retryPipeline: "Повторить обработку",
+    retrying: "Запускаем…",
+    retryConfirm:
+      "Повторно загрузить запись из АТС и разобрать звонок? Попробуйте после того, как добавили ключи АТС/AI.",
     notFound: "Звонок не найден или у вас нет к нему доступа.",
     pendingTitle: "Звонок ещё не разобран",
     pendingText: "Он в очереди на анализ — обновите страницу через минуту.",
@@ -1841,6 +1849,10 @@ const en = {
     reanalyzing: "Analyzing…",
     reanalyzeConfirm:
       "Re-analyze this call? The current analysis will be replaced, and this will spend tokens.",
+    retryPipeline: "Retry processing",
+    retrying: "Starting…",
+    retryConfirm:
+      "Re-pull the recording from the PBX and analyze this call? Try this after you've added the PBX/AI keys.",
     notFound: "The call was not found, or you don't have access to it.",
     pendingTitle: "The call is not analyzed yet",
     pendingText: "It is queued for analysis — refresh the page in a minute.",

@@ -81,6 +81,12 @@ export function requestAnalyze(orgId, callId) {
   return apiFetch(`/orgs/${orgId}/analyze`, { method: "POST", body: { call_id: callId } });
 }
 
+// Re-run the auto-pipeline for a stuck telephony call (status pending/failed).
+// The self-serve escape hatch after PBX/AI keys were pasted late.
+export function reingestCall(orgId, callId) {
+  return apiFetch(`/orgs/${orgId}/calls/${callId}/reingest`, { method: "POST" });
+}
+
 export function fetchAiKey(orgId) {
   return apiFetch(`/orgs/${orgId}/ai-key`);
 }

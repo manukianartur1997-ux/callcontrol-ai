@@ -2968,3 +2968,68 @@ test("purge: no-ops before migration 0005 (retention_days column absent)", async
   await purgeExpiredData(ENV, mock);
   assert.equal(mock.requests.some((r) => r.method === "PATCH"), false, "the missing column is swallowed, nothing scrubbed");
 });
+
+// ---------------------------------------------------------------------------
+// POST /calls/:id/reingest — the stuck-call recovery route (was defined but
+// never wired; these prove the route dispatches to reingestCall and gates).
+// ---------------------------------------------------------------------------
+function reingestReq(role, callResponse) {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, role);
+  if (callResponse !== undefined) {
+    mock.on("GET", "/rest/v1/calls", (record) =>
+      record.url.includes(`id=eq.${CALL_ID}`) ? { body: callResponse } : { body: [] }
+    );
+  }
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+  return mock;
+}
+
+test("reingest: a stuck telephony call is queued and audit-logged", async () => {
+  const mock = reingestReq("owner", [
+    { id: CALL_ID, source: "ringostat", status: "pending", manager_id: null, department_id: null }
+  ]);
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/calls/${CALL_ID}/reingest`, {}, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200, "route is wired and the guarded call is accepted");
+  assert.equal((await res.json()).status, "queued");
+  const audit = mock.requests.find(
+    (r) => r.method === "POST" && r.url.includes("/rest/v1/audit_log")
+  );
+  assert.ok(audit, "the reingest is audit-logged");
+  assert.equal(audit.body.action, "call.reingest");
+  assert.equal(audit.body.target, CALL_ID);
+});
+
+test("reingest: a viewer is refused (403) before any lookup", async () => {
+  const mock = reingestReq("viewer");
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/calls/${CALL_ID}/reingest`, {}, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 403);
+  assert.equal(mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/audit_log")), false);
+});
+
+test("reingest: an already-analyzed call is not reingestable (409)", async () => {
+  const mock = reingestReq("owner", [
+    { id: CALL_ID, source: "ringostat", status: "analyzed", manager_id: null, department_id: null }
+  ]);
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/calls/${CALL_ID}/reingest`, {}, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error, "not_reingestable");
+});
+
+test("reingest: a non-telephony (manual) call is not reingestable (409)", async () => {
+  const mock = reingestReq("owner", [
+    { id: CALL_ID, source: "manual", status: "failed", manager_id: null, department_id: null }
+  ]);
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/calls/${CALL_ID}/reingest`, {}, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 409);
+  assert.equal((await res.json()).error, "not_reingestable");
+});

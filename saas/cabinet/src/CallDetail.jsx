@@ -3,8 +3,11 @@
 // fetched to translate item keys into human labels.
 import { useState } from "react";
 import { supabase } from "./supabase.js";
-import { requestAnalyze } from "./api.js";
+import { requestAnalyze, reingestCall } from "./api.js";
 import { copy } from "./copy.js";
+
+// Sources whose stuck (pending/failed) calls can be re-pulled from the PBX.
+const TELEPHONY_SOURCES = new Set(["ringostat", "binotel", "phonet", "unitalk", "streamtele"]);
 import { useAsync } from "./hooks.js";
 import {
   fmtDateTime,
@@ -66,6 +69,7 @@ export function CallDetail({ org, callId }) {
     [org.org_id, callId]
   );
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [actionError, setActionError] = useState(null);
 
   async function reanalyze() {
@@ -79,6 +83,21 @@ export function CallDetail({ org, callId }) {
     }
     setReanalyzing(false);
     reload(); // success or failure — the call row reflects the outcome
+  }
+
+  // Re-run the telephony pipeline for a stuck call (no transcript to re-analyze,
+  // so this re-pulls the recording and runs STT + analysis from scratch).
+  async function retryPipeline() {
+    if (!window.confirm(copy.call.retryConfirm)) return;
+    setRetrying(true);
+    setActionError(null);
+    try {
+      await reingestCall(org.org_id, callId);
+    } catch (err) {
+      setActionError(err);
+    }
+    setRetrying(false);
+    reload();
   }
 
   if (loading) return <CenterSpinner />;
@@ -108,6 +127,11 @@ export function CallDetail({ org, callId }) {
   const items = checklistIndex(data.checklists, analysis);
   const transcript = Array.isArray(call.transcripts) ? call.transcripts[0] : call.transcripts;
   const canReanalyze = org.role !== "viewer" && transcript;
+  const canRetry =
+    org.role !== "viewer" &&
+    !analysis &&
+    TELEPHONY_SOURCES.has(call.source) &&
+    ["pending", "failed"].includes(call.status);
   const score = analysis?.score != null ? Math.round(Number(analysis.score)) : null;
 
   return (
@@ -160,12 +184,34 @@ export function CallDetail({ org, callId }) {
       {call.status === "failed" && !analysis ? (
         <Card title={copy.call.failedTitle}>
           <p className="form-error">{humanApiError(call.error || "generic")}</p>
+          {canRetry ? (
+            <button type="button" className="btn btn-ghost" onClick={retryPipeline} disabled={retrying}>
+              {retrying ? (
+                <>
+                  <Spinner small /> {copy.call.retrying}
+                </>
+              ) : (
+                copy.call.retryPipeline
+              )}
+            </button>
+          ) : null}
         </Card>
       ) : null}
 
       {!analysis && call.status !== "failed" ? (
         <Card>
           <EmptyState title={copy.call.pendingTitle} text={copy.call.pendingText} />
+          {canRetry ? (
+            <button type="button" className="btn btn-ghost" onClick={retryPipeline} disabled={retrying}>
+              {retrying ? (
+                <>
+                  <Spinner small /> {copy.call.retrying}
+                </>
+              ) : (
+                copy.call.retryPipeline
+              )}
+            </button>
+          ) : null}
         </Card>
       ) : null}
 

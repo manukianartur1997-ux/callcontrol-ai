@@ -2614,6 +2614,12 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     const makeDefaultMatch = rest.match(/^checklists\/([^/]+)\/make-default$/);
     if (makeDefaultMatch && method === "POST") return makeDefaultChecklist(orgId, user, membership, makeDefaultMatch[1]);
 
+    // POST /calls/:callId/reingest — re-run the pipeline for a stuck telephony
+    // call (pending/failed). The customer's escape hatch after pasting PBX/AI
+    // keys late; ownership-gated inside reingestCall.
+    const reingestMatch = rest.match(/^calls\/([^/]+)\/reingest$/);
+    if (reingestMatch && method === "POST") return reingestCall(orgId, user, membership, reingestMatch[1]);
+
     const rotateMatch = rest.match(/^integrations\/([a-z0-9_-]{1,32})\/rotate-token$/);
     if (rotateMatch && method === "POST") {
       return rotateIntegrationToken(orgId, user, membership, rotateMatch[1]);
