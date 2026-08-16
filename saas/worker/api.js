@@ -87,7 +87,19 @@ const BILLING_LEDGER_SCAN = 2000;
 // Retention cleanup bounds (see purgeExpiredData). One cron tick can never turn
 // into an unbounded table scan; the next tick picks up whatever is left, since
 // redacted_at IS NULL is the worklist.
-const PURGE_MAX_ROWS = 500;
+const PURGE_MAX_ROWS = 500; // due transcripts scrubbed per org per tick
+const PURGE_ORG_PAGE = 200; // orgs fetched per page (paginated, no fixed cap)
+const PURGE_MAX_ORG_PAGES = 50; // backstop: at most 10k orgs visited per tick
+const PURGE_ID_CHUNK = 100; // ids per PATCH so a batch never blows the URL length
+
+// Split an array into sub-arrays of at most `size` (size <= 0 → one chunk).
+function chunkList(items, size) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  if (!(size > 0)) return [items];
+  const out = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
 // Blanked transcript text after the retention window. `transcripts.text` is
 // NOT NULL, so a redacted row keeps an empty string (the redacted_at stamp,
 // not the text, records that scrubbing happened).
@@ -2752,83 +2764,86 @@ export async function dailyDigest(env, fetchImpl = fetch) {
 // migration 0005: scores stay forever, raw text is scrubbed after the window.
 //
 // Idempotent: redacted_at IS NULL is the worklist, so an already-scrubbed row
-// is never touched again and the job can safely re-run. Bounded per tick
-// (PURGE_MAX_ROWS transcripts, oldest-first, across ALL orgs) so it can never
-// turn into an unbounded scan; the next tick picks up whatever remains.
+// is never touched again and the job can safely re-run.
 //
-// Silent no-op before migration 0005: the transcripts read/PATCH naming
-// redacted_at fails and is swallowed, so nothing is scrubbed until the
-// column exists.
+// Per-org, DUE-FILTERED, PAGINATED. Each org's window differs, so dueness is
+// pushed into the query as created_at < (now - retention_days) rather than
+// filtered in JS after a shared fetch — otherwise a long-retention org's
+// old-but-not-due rows could fill a global batch and starve a short-retention
+// org's genuinely-due rows. Orgs are paged (no fixed cap), each org scrubs up
+// to PURGE_MAX_ROWS due rows per tick, and the id lists are chunked so a PATCH
+// URL can never blow a gateway length limit. The next tick picks up the rest.
+//
+// Silent no-op before migration 0005: the organizations read naming
+// retention_days (or the transcripts read/PATCH naming redacted_at) fails and
+// is swallowed, so nothing is scrubbed until the columns exist.
 export async function purgeExpiredData(env, fetchImpl = fetch) {
   if (!env?.SUPABASE_URL || !env?.SUPABASE_SECRET_KEY) return;
 
-  // Worklist is driven straight off the un-redacted transcripts themselves —
-  // NOT off a (capped) list of orgs — so retention holds no matter how many
-  // customers exist. Oldest-first: the rows most likely past their window are
-  // fetched first, so a bounded batch never starves a due row behind a
-  // not-yet-due one. Each row carries its own org's retention_days via the FK
-  // embed, so one global query resolves every org's window at once.
-  let stale;
-  try {
-    const workParams = new URLSearchParams({
-      select: "id,call_id,created_at,org_id,organizations(retention_days)",
-      order: "created_at.asc",
-      limit: String(PURGE_MAX_ROWS)
-    });
-    workParams.set("redacted_at", "is.null");
-    stale = await sbGet(env, fetchImpl, `transcripts?${workParams}`);
-  } catch (_) {
-    return; // pre-0005 (no redacted_at column) or Supabase down — nothing to do
-  }
-  if (!Array.isArray(stale) || !stale.length) return;
-
-  const now = Date.now();
   const nowIso = new Date().toISOString();
 
-  // Keep only rows past their OWN org's window, then group by org so each PATCH
-  // stays scoped to a single org (defence in depth on top of the service key).
-  const byOrg = new Map();
-  for (const row of stale) {
-    if (!row?.id || !row?.org_id || !row?.created_at) continue;
-    const retentionDays =
-      Number.isFinite(row.organizations?.retention_days) && row.organizations.retention_days > 0
-        ? row.organizations.retention_days
-        : RETENTION_DEFAULT_DAYS;
-    const cutoff = now - retentionDays * 86_400_000;
-    if (new Date(row.created_at).getTime() >= cutoff) continue; // not due yet
-    if (!byOrg.has(row.org_id)) byOrg.set(row.org_id, []);
-    byOrg.get(row.org_id).push(row);
-  }
-  if (!byOrg.size) return;
-
-  for (const [orgId, rows] of byOrg) {
+  for (let page = 0; page < PURGE_MAX_ORG_PAGES; page++) {
+    let orgs;
     try {
-      const transcriptIds = rows.map((row) => row.id).filter(Boolean);
-      const callIds = [...new Set(rows.map((row) => row.call_id).filter(Boolean))];
-      if (!transcriptIds.length) continue;
-
-      // Blank the raw text + stamp redacted_at (idempotency marker). The scoped
-      // filter re-checks redacted_at IS NULL so a concurrent run cannot re-scrub.
-      const patchParams = new URLSearchParams();
-      patchParams.set("org_id", `eq.${orgId}`);
-      patchParams.set("id", `in.(${transcriptIds.join(",")})`);
-      patchParams.set("redacted_at", "is.null");
-      await sbPatch(env, fetchImpl, `transcripts?${patchParams}`, {
-        body: { text: REDACTED_TEXT_MARKER, redacted_at: nowIso }
-      });
-
-      // Drop the recording links on those calls; keep the call + score rows.
-      if (callIds.length) {
-        const callParams = new URLSearchParams();
-        callParams.set("org_id", `eq.${orgId}`);
-        callParams.set("id", `in.(${callIds.join(",")})`);
-        await sbPatch(env, fetchImpl, `calls?${callParams}`, {
-          body: { recording_url: null }
-        });
-      }
+      orgs = await sbGet(env, fetchImpl, `organizations?${new URLSearchParams({
+        select: "id,retention_days",
+        order: "id.asc",
+        offset: String(page * PURGE_ORG_PAGE),
+        limit: String(PURGE_ORG_PAGE)
+      })}`);
     } catch (_) {
-      // Transient error on this org — skip it; other orgs still get processed
-      // and the next tick retries whatever remains un-redacted.
+      return; // pre-0005 (no retention_days column) or Supabase down — stop
     }
+    if (!Array.isArray(orgs) || !orgs.length) return;
+
+    for (const org of orgs) {
+      if (!org?.id) continue;
+      const retentionDays =
+        Number.isFinite(org.retention_days) && org.retention_days > 0
+          ? org.retention_days
+          : RETENTION_DEFAULT_DAYS;
+      const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
+
+      try {
+        // Worklist: this org's un-redacted transcripts already past its window.
+        const workParams = new URLSearchParams({ select: "id,call_id", limit: String(PURGE_MAX_ROWS) });
+        workParams.set("org_id", `eq.${org.id}`);
+        workParams.set("created_at", `lt.${cutoff}`);
+        workParams.set("redacted_at", "is.null");
+        const stale = await sbGet(env, fetchImpl, `transcripts?${workParams}`);
+        if (!Array.isArray(stale) || !stale.length) continue;
+
+        const transcriptIds = stale.map((row) => row.id).filter(Boolean);
+        const callIds = [...new Set(stale.map((row) => row.call_id).filter(Boolean))];
+
+        // Blank the raw text + stamp redacted_at (idempotency marker), chunked.
+        // The scoped filter re-checks redacted_at IS NULL so a concurrent run
+        // cannot re-scrub, and stays pinned to this org.
+        for (const ids of chunkList(transcriptIds, PURGE_ID_CHUNK)) {
+          const patchParams = new URLSearchParams();
+          patchParams.set("org_id", `eq.${org.id}`);
+          patchParams.set("id", `in.(${ids.join(",")})`);
+          patchParams.set("redacted_at", "is.null");
+          await sbPatch(env, fetchImpl, `transcripts?${patchParams}`, {
+            body: { text: REDACTED_TEXT_MARKER, redacted_at: nowIso }
+          });
+        }
+
+        // Drop the recording links on those calls; keep the call + score rows.
+        for (const ids of chunkList(callIds, PURGE_ID_CHUNK)) {
+          const callParams = new URLSearchParams();
+          callParams.set("org_id", `eq.${org.id}`);
+          callParams.set("id", `in.(${ids.join(",")})`);
+          await sbPatch(env, fetchImpl, `calls?${callParams}`, {
+            body: { recording_url: null }
+          });
+        }
+      } catch (_) {
+        // Transient error on this org — skip it; other orgs still get processed
+        // and the next tick retries whatever remains un-redacted.
+      }
+    }
+
+    if (orgs.length < PURGE_ORG_PAGE) return; // last page reached
   }
 }

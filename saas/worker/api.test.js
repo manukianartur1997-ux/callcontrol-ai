@@ -2863,33 +2863,26 @@ test("billing PUT: 503 migration_required when the columns are absent", async ()
 
 test("purge: blanks an old transcript, stamps redacted_at, and nulls the recording_url", async () => {
   const mock = createFetchMock();
-  // One global, oldest-first worklist across all orgs; each row carries its own
-  // org's retention window via the FK embed. This row is years past 90 days.
-  mock.on("GET", "/rest/v1/transcripts", {
-    body: [{
-      id: "t-1",
-      call_id: CALL_ID,
-      org_id: ORG_ID,
-      created_at: "2020-01-01T00:00:00Z",
-      organizations: { retention_days: 90 }
-    }]
-  });
+  // Orgs are paged; each org's due rows are filtered server-side by its own
+  // window. This org's worklist query is answered with one stale transcript.
+  mock.on("GET", "/rest/v1/organizations", { body: [{ id: ORG_ID, retention_days: 90 }] });
+  mock.on("GET", "/rest/v1/transcripts", { body: [{ id: "t-1", call_id: CALL_ID }] });
   mock.on("PATCH", "/rest/v1/transcripts", { status: 204 });
   mock.on("PATCH", "/rest/v1/calls", { status: 204 });
 
   await purgeExpiredData(ENV, mock);
 
-  // The worklist is driven off un-redacted transcripts, oldest-first, with each
-  // row's org retention embedded — no capped org list is fetched first.
-  assert.equal(
-    mock.requests.some((r) => r.method === "GET" && r.url.includes("/rest/v1/organizations")),
-    false,
-    "no separate org list — the worklist IS the transcripts, so retention scales past any org cap"
-  );
+  // Orgs are read paginated (stable order, no fixed cap).
+  const orgReq = mock.requests.find((r) => r.method === "GET" && r.url.includes("/rest/v1/organizations"));
+  assert.ok(orgReq, "orgs are paged");
+  assert.match(decodeURIComponent(orgReq.url), /order=id\.asc/);
+
+  // The worklist is due-filtered IN THE QUERY (created_at < window), scoped to
+  // the org, un-redacted only — not filtered in JS after a shared fetch.
   const work = mock.requests.find((r) => r.method === "GET" && r.url.includes("/rest/v1/transcripts"));
   assert.match(decodeURIComponent(work.url), /redacted_at=is\.null/);
-  assert.match(decodeURIComponent(work.url), /order=created_at\.asc/);
-  assert.match(decodeURIComponent(work.url), /organizations\(retention_days\)/);
+  assert.match(decodeURIComponent(work.url), /created_at=lt\./);
+  assert.match(decodeURIComponent(work.url), new RegExp(`org_id=eq\\.${ORG_ID}`));
 
   const tPatch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/transcripts"));
   assert.ok(tPatch, "the stale transcript was scrubbed");
@@ -2897,34 +2890,65 @@ test("purge: blanks an old transcript, stamps redacted_at, and nulls the recordi
   assert.ok(tPatch.body.redacted_at, "redacted_at is stamped");
   assert.match(decodeURIComponent(tPatch.url), /redacted_at=is\.null/, "re-checks the marker so a concurrent run cannot re-scrub");
   assert.match(decodeURIComponent(tPatch.url), /id=in\.\(t-1\)/);
-  assert.match(decodeURIComponent(tPatch.url), new RegExp(`org_id=eq\\.${ORG_ID}`), "PATCH stays scoped to the row's org");
+  assert.match(decodeURIComponent(tPatch.url), new RegExp(`org_id=eq\\.${ORG_ID}`), "PATCH stays scoped to the org");
 
   const cPatch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/calls"));
   assert.equal(cPatch.body.recording_url, null, "recording link dropped");
   assert.match(decodeURIComponent(cPatch.url), new RegExp(`id=in\\.\\(${CALL_ID}\\)`));
 });
 
-test("purge: a not-yet-due transcript is left untouched (created inside the window)", async () => {
+test("purge: the due window in the query is derived from the org's retention_days", async () => {
   const mock = createFetchMock();
-  // Un-redacted but only ~1 day old against a 90-day window: fetched by the
-  // worklist, filtered out client-side against its own org's cutoff, not scrubbed.
-  const yesterday = new Date(Date.now() - 86_400_000).toISOString();
-  mock.on("GET", "/rest/v1/transcripts", {
-    body: [{
-      id: "t-fresh",
-      call_id: CALL_ID,
-      org_id: ORG_ID,
-      created_at: yesterday,
-      organizations: { retention_days: 90 }
-    }]
-  });
+  mock.on("GET", "/rest/v1/organizations", { body: [{ id: ORG_ID, retention_days: 30 }] });
+  mock.on("GET", "/rest/v1/transcripts", { body: [] }); // nothing due -> no writes
 
   await purgeExpiredData(ENV, mock);
-  assert.equal(mock.requests.some((r) => r.method === "PATCH"), false, "inside the window -> no PATCH");
+
+  const work = mock.requests.find((r) => r.method === "GET" && r.url.includes("/rest/v1/transcripts"));
+  const m = decodeURIComponent(work.url).match(/created_at=lt\.([^&]+)/);
+  assert.ok(m, "worklist carries a created_at upper bound");
+  const cutoffDaysAgo = (Date.now() - new Date(m[1]).getTime()) / 86_400_000;
+  assert.ok(cutoffDaysAgo > 29 && cutoffDaysAgo < 31, `cutoff ~30d ago, got ${cutoffDaysAgo.toFixed(1)}d`);
+  assert.equal(mock.requests.some((r) => r.method === "PATCH"), false, "nothing due -> no PATCH");
+});
+
+test("purge: a long-retention org cannot starve a short-retention org's due rows", async () => {
+  // The regression this guards against: with a shared global worklist ordered by
+  // created_at, org LONG's old-but-not-due rows could fill the batch and org
+  // SHORT's genuinely-due rows would never be scrubbed. Per-org due-filtering
+  // makes that impossible — each org's query returns only ITS due rows.
+  const ORG_LONG = "11111111-aaaa-4aaa-8aaa-111111111111";
+  const ORG_SHORT = "22222222-bbbb-4bbb-8bbb-222222222222";
+  const mock = createFetchMock();
+  mock.on("GET", "/rest/v1/organizations", {
+    body: [
+      { id: ORG_LONG, retention_days: 3650 }, // processed FIRST (id.asc), nothing due
+      { id: ORG_SHORT, retention_days: 30 }
+    ]
+  });
+  // The DB applies created_at<cutoff: LONG returns none, SHORT returns a due row.
+  mock.on("GET", "/rest/v1/transcripts", (req) =>
+    req.url.includes(`org_id=eq.${ORG_SHORT}`)
+      ? { body: [{ id: "t-short", call_id: "c-short" }] }
+      : { body: [] }
+  );
+  mock.on("PATCH", "/rest/v1/transcripts", { status: 204 });
+  mock.on("PATCH", "/rest/v1/calls", { status: 204 });
+
+  await purgeExpiredData(ENV, mock);
+
+  // Both orgs were queried, and the SHORT org's due row was scrubbed despite the
+  // LONG org being processed first.
+  assert.ok(mock.requests.some((r) => r.method === "GET" && r.url.includes(`org_id=eq.${ORG_LONG}`)), "long org queried");
+  const tPatch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/transcripts"));
+  assert.ok(tPatch, "the short-retention org's due row was scrubbed (no starvation)");
+  assert.match(decodeURIComponent(tPatch.url), /id=in\.\(t-short\)/);
+  assert.match(decodeURIComponent(tPatch.url), new RegExp(`org_id=eq\\.${ORG_SHORT}`));
 });
 
 test("purge: an already-redacted transcript is skipped (empty worklist -> no writes)", async () => {
   const mock = createFetchMock();
+  mock.on("GET", "/rest/v1/organizations", { body: [{ id: ORG_ID, retention_days: 90 }] });
   // redacted_at IS NULL matched nothing — the row was scrubbed on a prior run.
   mock.on("GET", "/rest/v1/transcripts", { body: [] });
 
@@ -2932,11 +2956,13 @@ test("purge: an already-redacted transcript is skipped (empty worklist -> no wri
   assert.equal(mock.requests.some((r) => r.method === "PATCH"), false, "nothing stale -> no PATCH");
 });
 
-test("purge: no-ops before migration 0005 (redacted_at column absent)", async () => {
+test("purge: no-ops before migration 0005 (retention_days column absent)", async () => {
   const mock = createFetchMock();
-  mock.on("GET", "/rest/v1/transcripts", {
+  // Pre-0005 the organizations.retention_days column does not exist -> the org
+  // read fails and the whole job is a swallowed no-op.
+  mock.on("GET", "/rest/v1/organizations", {
     status: 400,
-    body: { code: "42703", message: "column transcripts.redacted_at does not exist" }
+    body: { code: "42703", message: "column organizations.retention_days does not exist" }
   });
 
   await purgeExpiredData(ENV, mock);
