@@ -2065,6 +2065,43 @@ test("org-settings PUT: a pre-0004 database answers 503 migration_required", asy
   assert.deepEqual(await res.json(), { error: "migration_required" });
 });
 
+test("org-settings PUT: ui_language is settable and validated (was read-only before)", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("PATCH", "/rest/v1/organizations", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+  const ok = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/org-settings`, { ui_language: "en" }, GOOD_TOKEN)
+  );
+  assert.equal(ok.status, 200);
+  const patch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/organizations"));
+  assert.deepEqual(patch.body, { ui_language: "en" });
+
+  // both fields at once are allowed
+  const both = createFetchMock();
+  seedAuth(both);
+  seedMembership(both, "owner");
+  both.on("PATCH", "/rest/v1/organizations", { status: 204 });
+  both.on("POST", "/rest/v1/audit_log", { status: 201 });
+  const res2 = await makeApi(both).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/org-settings`, { avg_deal_amount: 1000, ui_language: "ru" }, GOOD_TOKEN)
+  );
+  assert.equal(res2.status, 200);
+  const p2 = both.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/organizations"));
+  assert.deepEqual(p2.body, { avg_deal_amount: 1000, ui_language: "ru" });
+
+  // an unsupported language is rejected
+  const bad = createFetchMock();
+  seedAuth(bad);
+  seedMembership(bad, "owner");
+  const res3 = await makeApi(bad).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/org-settings`, { ui_language: "de" }, GOOD_TOKEN)
+  );
+  assert.equal(res3.status, 400);
+  assert.equal((await res3.json()).error, "bad_ui_language");
+});
+
 test("/me merges avg_deal_amount and ui_language from the defensive second query", async () => {
   const mock = createFetchMock();
   seedAuth(mock);
@@ -2859,6 +2896,76 @@ test("billing PUT: 503 migration_required when the columns are absent", async ()
   );
   assert.equal(res.status, 503);
   assert.deepEqual(await res.json(), { error: "migration_required" });
+});
+
+test("billing GET: the ledger is time-bounded and paginated, so a >1000-row month is not truncated", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("GET", "/rest/v1/organizations", {
+    body: [{ id: ORG_ID, billing_plan: "payg", rate_per_minute: 4, billing_currency: "UAH", retention_days: 90 }]
+  });
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  // 1500 calls this month => page 0 returns a FULL 1000, page 1 returns 500.
+  // A flat newest-2000 scan would still catch this, but a newest-1000 (or any
+  // month past the cap) would truncate; pagination must sum all 1500.
+  const row = (i) => ({ minutes: 1, cost: 4, created_at: `${thisMonth}-15T10:00:${String(i % 60).padStart(2, "0")}Z` });
+  const all = Array.from({ length: 1500 }, (_, i) => row(i));
+  mock.on("GET", "/rest/v1/usage_ledger", (record) => {
+    const m = decodeURIComponent(record.url).match(/offset=(\d+)/);
+    const offset = m ? Number(m[1]) : 0;
+    return { body: all.slice(offset, offset + 1000) };
+  });
+
+  const res = await makeApi(mock).handle(get(`/api/app/orgs/${ORG_ID}/billing`, GOOD_TOKEN));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.current_month.calls, 1500, "every row in the month is counted, not just the first page");
+  assert.equal(body.current_month.cost, 6000, "1500 * 4");
+
+  // The scan is bounded to the shown 6-month window (created_at >= start).
+  const work = mock.requests.find((r) => r.method === "GET" && r.url.includes("/rest/v1/usage_ledger"));
+  assert.match(decodeURIComponent(work.url), /created_at=gte\./);
+  // Two pages were actually fetched.
+  const pages = mock.requests.filter((r) => r.method === "GET" && r.url.includes("/rest/v1/usage_ledger"));
+  assert.equal(pages.length, 2, "page 0 (full) then page 1 (partial), then stop");
+});
+
+test("billing PUT: currency is settable and validated", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("PATCH", "/rest/v1/organizations", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+  const ok = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/billing`, { currency: "USD" }, GOOD_TOKEN)
+  );
+  assert.equal(ok.status, 200);
+  const patch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/organizations"));
+  assert.deepEqual(patch.body, { billing_currency: "USD" });
+
+  // a currency outside the enum is rejected
+  const bad = createFetchMock();
+  seedAuth(bad);
+  seedMembership(bad, "owner");
+  const res = await makeApi(bad).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/billing`, { currency: "GBP" }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).error, "bad_currency");
+});
+
+test("billing PUT: a persisted change survives an audit-log outage (no false 500)", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("PATCH", "/rest/v1/organizations", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 500, body: { message: "audit down" } });
+  const res = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/billing`, { rate_per_minute: 7 }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200, "the billing change already persisted; audit is best-effort");
+  assert.deepEqual(await res.json(), { ok: true });
 });
 
 test("purge: blanks an old transcript, stamps redacted_at, and nulls the recording_url", async () => {

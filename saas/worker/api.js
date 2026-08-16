@@ -78,11 +78,15 @@ const PLATFORM_SCAN_CAP = 5000;
 const PLATFORM_DEFAULT_RATE = 4;
 const RETENTION_DEFAULT_DAYS = 90;
 const BILLING_PLANS = new Set(["payg", "trial", "custom"]);
-// Bounded ledger scan for the billing summary: PostgREST has no GROUP BY
-// without a DB view (which this pilot avoids), so the newest N ledger lines
-// are pulled and grouped into months in JS. N covers many months at pilot
-// volume; anything older simply falls outside the 6-month window shown.
-const BILLING_LEDGER_SCAN = 2000;
+const BILLING_CURRENCIES = new Set(["UAH", "USD", "EUR"]);
+const UI_LANGUAGES = new Set(["uk", "ru", "en"]); // matches organizations.ui_language CHECK (0004)
+// Ledger scan for the billing summary: PostgREST has no GROUP BY without a DB
+// view (which this pilot avoids), so ledger lines are pulled and grouped into
+// months in JS. To avoid undercounting a busy month, the scan is TIME-BOUNDED
+// to the 6-month window actually shown and PAGINATED through every row in it —
+// not capped at a flat newest-N that a high-volume month could exceed.
+const BILLING_LEDGER_PAGE = 1000; // rows per page
+const BILLING_LEDGER_MAX_PAGES = 60; // safety backstop: <=60k rows/6mo scanned
 
 // Retention cleanup bounds (see purgeExpiredData). One cron tick can never turn
 // into an unbounded table scan; the next tick picks up whatever is left, since
@@ -1615,37 +1619,39 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     if (membership.role !== "owner") return json({ error: "forbidden" }, 403);
 
     const body = await request.json().catch(() => null);
-    if (!body || !("avg_deal_amount" in body)) return json({ error: "bad_request" }, 400);
+    if (!body || typeof body !== "object") return json({ error: "bad_request" }, 400);
 
-    let value = null;
-    if (body.avg_deal_amount !== null) {
-      if (
-        typeof body.avg_deal_amount !== "number" ||
-        !Number.isFinite(body.avg_deal_amount) ||
-        body.avg_deal_amount < 0 ||
-        body.avg_deal_amount > 1e12
-      ) {
-        return json({ error: "bad_avg_deal_amount" }, 400);
+    const patch = {};
+    if ("avg_deal_amount" in body) {
+      let value = null;
+      if (body.avg_deal_amount !== null) {
+        if (
+          typeof body.avg_deal_amount !== "number" ||
+          !Number.isFinite(body.avg_deal_amount) ||
+          body.avg_deal_amount < 0 ||
+          body.avg_deal_amount > 1e12
+        ) {
+          return json({ error: "bad_avg_deal_amount" }, 400);
+        }
+        value = body.avg_deal_amount;
       }
-      value = body.avg_deal_amount;
+      patch.avg_deal_amount = value;
     }
+    if ("ui_language" in body) {
+      if (!UI_LANGUAGES.has(body.ui_language)) return json({ error: "bad_ui_language" }, 400);
+      patch.ui_language = body.ui_language;
+    }
+    if (!Object.keys(patch).length) return json({ error: "bad_request" }, 400);
 
     try {
-      await sbPatch(env, fetchImpl, `organizations?${sbEq({ id: orgId })}`, {
-        body: { avg_deal_amount: value }
-      });
+      await sbPatch(env, fetchImpl, `organizations?${sbEq({ id: orgId })}`, { body: patch });
     } catch (error) {
       if (isMissingColumnError(error)) return json({ error: "migration_required" }, 503);
       throw error;
     }
     await sbPost(env, fetchImpl, "audit_log", {
-      body: {
-        org_id: orgId,
-        actor_id: user.id,
-        action: "org.settings_updated",
-        meta: { avg_deal_amount: value }
-      }
-    });
+      body: { org_id: orgId, actor_id: user.id, action: "org.settings_updated", meta: patch }
+    }).catch(() => {});
     return json({ ok: true });
   }
 
@@ -2209,20 +2215,35 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     }
     if (!billing) return json({ error: "org_not_found" }, 404);
 
-    // Ledger: newest N lines, grouped into calendar months in JS (PostgREST has
-    // no GROUP BY without a DB view). A missing usage_ledger table is pre-0005.
-    let ledger;
+    // Ledger for the 6-month summary: every row in that window, PAGINATED, then
+    // grouped into calendar months in JS (PostgREST has no GROUP BY without a DB
+    // view). Time-bounded + paginated so a high-volume month is never truncated
+    // (the old flat newest-2000 scan undercounted once a month exceeded 2000
+    // rows). A missing usage_ledger table is pre-0005.
+    const windowStart = new Date(
+      Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth() - 5, 1)
+    ).toISOString();
+    const ledger = [];
     try {
-      ledger = await sbGet(env, fetchImpl, `usage_ledger?${sbEq({ org_id: orgId }, {
-        select: "minutes,cost,created_at",
-        order: "created_at.desc",
-        limit: String(BILLING_LEDGER_SCAN)
-      })}`);
+      for (let page = 0; page < BILLING_LEDGER_MAX_PAGES; page++) {
+        const chunk = await sbGet(env, fetchImpl, `usage_ledger?${sbEq(
+          { org_id: orgId },
+          {
+            select: "minutes,cost,created_at",
+            "created_at": `gte.${windowStart}`,
+            order: "created_at.desc",
+            offset: String(page * BILLING_LEDGER_PAGE),
+            limit: String(BILLING_LEDGER_PAGE)
+          }
+        )}`);
+        if (!Array.isArray(chunk) || !chunk.length) break;
+        ledger.push(...chunk);
+        if (chunk.length < BILLING_LEDGER_PAGE) break; // last page
+      }
     } catch (error) {
       if (isMissingTableError(error)) return json({ error: "migration_required" }, 503);
       throw error;
     }
-    ledger = Array.isArray(ledger) ? ledger : [];
 
     const byMonth = new Map();
     for (const row of ledger) {
@@ -2289,6 +2310,10 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
       if (!BILLING_PLANS.has(body.plan)) return json({ error: "bad_plan" }, 400);
       patch.billing_plan = body.plan;
     }
+    if ("currency" in body) {
+      if (!BILLING_CURRENCIES.has(body.currency)) return json({ error: "bad_currency" }, 400);
+      patch.billing_currency = body.currency;
+    }
     if (!Object.keys(patch).length) return json({ error: "bad_request" }, 400);
 
     try {
@@ -2299,9 +2324,11 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
       }
       throw error;
     }
+    // Audit is best-effort telemetry: the billing change is already persisted, so
+    // a logging outage must not turn a successful PUT into a 500 the client retries.
     await sbPost(env, fetchImpl, "audit_log", {
       body: { org_id: orgId, actor_id: user.id, action: "org.billing_updated", meta: patch }
-    });
+    }).catch(() => {});
     return json({ ok: true });
   }
 
