@@ -9,7 +9,15 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { analyzeCall, transcribeAudio, defaultModelFor, supportedProviders, __testing } from "./ai.js";
+import {
+  analyzeCall,
+  transcribeAudio,
+  defaultModelFor,
+  supportedProviders,
+  supportedSttProviders,
+  defaultSttModel,
+  __testing
+} from "./ai.js";
 
 const CHECKLIST = {
   items: [
@@ -372,4 +380,151 @@ test("every provider has a default model", () => {
   for (const provider of supportedProviders()) {
     assert.ok(defaultModelFor(provider), `${provider} has no default model`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// STT: transcribeAudio (Deepgram Nova-3, real diarization)
+// ---------------------------------------------------------------------------
+
+// A Deepgram diarized envelope: two speakers, utterances plus a matching word
+// stream, detected language and duration in metadata.
+function deepgramEnvelope({
+  detected = "uk",
+  duration = 132,
+  withUtterances = true
+} = {}) {
+  const words = [
+    { word: "добрий", punctuated_word: "Добрий", speaker: 0 },
+    { word: "день", punctuated_word: "день,", speaker: 0 },
+    { word: "це", punctuated_word: "це", speaker: 0 },
+    { word: "петро", punctuated_word: "Петро.", speaker: 0 },
+    { word: "вітаю", punctuated_word: "Вітаю,", speaker: 1 },
+    { word: "розкажіть", punctuated_word: "розкажіть", speaker: 1 },
+    { word: "про", punctuated_word: "про", speaker: 1 },
+    { word: "тарифи", punctuated_word: "тарифи.", speaker: 1 }
+  ];
+  const results = {
+    channels: [{ detected_language: detected, alternatives: [{ words }] }]
+  };
+  if (withUtterances) {
+    results.utterances = [
+      { speaker: 0, transcript: "Добрий день, це Петро." },
+      { speaker: 1, transcript: "Вітаю, розкажіть про тарифи." }
+    ];
+  }
+  return { metadata: { duration }, results };
+}
+
+// atob decode of "QUJD" is "ABC" -> bytes 65,66,67.
+const AUDIO_B64 = "QUJD";
+
+function deepgramStub(buildResponse, { ok = true, status = 200 } = {}) {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    return { ok, status, json: async () => buildResponse(), text: async () => buildResponse() };
+  };
+  return { fetchImpl, calls };
+}
+
+test("deepgram: request shape — nova-3, diarize, Token auth, decoded body, key not in URL", async () => {
+  const { fetchImpl, calls } = deepgramStub(() => deepgramEnvelope());
+
+  await transcribeAudio({
+    provider: "deepgram",
+    apiKey: "dg-secret-key",
+    audioB64: AUDIO_B64,
+    mime: "audio/mpeg",
+    fetchImpl
+  });
+
+  const [call] = calls;
+  assert.match(call.url, /^https:\/\/api\.deepgram\.com\/v1\/listen\?/);
+  assert.match(call.url, /model=nova-3/);
+  assert.match(call.url, /diarize=true/);
+  assert.match(call.url, /punctuate=true/);
+  assert.match(call.url, /smart_format=true/);
+  assert.match(call.url, /detect_language=true/);
+
+  // The key rides the Authorization header, never the URL.
+  assert.equal(call.init.headers.authorization, "Token dg-secret-key");
+  assert.equal(call.url.includes("dg-secret-key"), false, "key must never appear in the URL");
+
+  // Content-Type is the source mime, and the body is the decoded audio bytes.
+  assert.equal(call.init.headers["content-type"], "audio/mpeg");
+  assert.ok(call.init.body instanceof Uint8Array, "body is raw bytes, not a JSON string");
+  assert.deepEqual([...call.init.body], [65, 66, 67], "QUJD decodes to ABC");
+});
+
+test("deepgram: diarized utterances -> Менеджер/Клиент labelled multi-line transcript", async () => {
+  const { fetchImpl } = deepgramStub(() => deepgramEnvelope());
+
+  const result = await transcribeAudio({
+    provider: "deepgram",
+    apiKey: "k",
+    audioB64: AUDIO_B64,
+    mime: "audio/wav",
+    fetchImpl
+  });
+
+  assert.equal(
+    result.text,
+    "Менеджер: Добрий день, це Петро.\nКлиент: Вітаю, розкажіть про тарифи."
+  );
+  assert.equal(result.lang, "uk", "detect_language maps to lang, lowercased");
+  assert.equal(result.provider, "deepgram");
+  assert.equal(result.tokensIn, null);
+  assert.equal(result.tokensOut, null);
+  assert.equal(result.minutes, 132 / 60, "minutes come from metadata.duration");
+});
+
+test("deepgram: falls back to the diarized word stream when there are no utterances", () => {
+  // Same speaker turns, reconstructed by grouping consecutive same-speaker words.
+  const text = __testing.deepgramTranscript(deepgramEnvelope({ withUtterances: false }));
+  assert.equal(
+    text,
+    "Менеджер: Добрий день, це Петро.\nКлиент: Вітаю, розкажіть про тарифи."
+  );
+});
+
+test("deepgram: the first speaker to talk is Менеджер regardless of index", () => {
+  // Speaker numbering starts at 1 here; whoever speaks first is still Менеджер.
+  const data = {
+    results: {
+      utterances: [
+        { speaker: 1, transcript: "Алло?" },
+        { speaker: 2, transcript: "Добрий день." }
+      ]
+    }
+  };
+  assert.equal(
+    __testing.deepgramTranscript(data),
+    "Менеджер: Алло?\nКлиент: Добрий день."
+  );
+});
+
+test("deepgram: a 500 throws deepgram_http_500 with a body snippet", async () => {
+  const { fetchImpl } = deepgramStub(() => "internal error", { ok: false, status: 500 });
+  await assert.rejects(
+    transcribeAudio({ provider: "deepgram", apiKey: "k", audioB64: AUDIO_B64, mime: "audio/mpeg", fetchImpl }),
+    /deepgram_http_500 internal error/
+  );
+});
+
+test("deepgram: an empty diarization throws transcription_empty", async () => {
+  const { fetchImpl } = deepgramStub(() => ({ metadata: {}, results: { utterances: [] } }));
+  await assert.rejects(
+    transcribeAudio({ provider: "deepgram", apiKey: "k", audioB64: AUDIO_B64, mime: "audio/mpeg", fetchImpl }),
+    /transcription_empty/
+  );
+});
+
+test("stt provider registry: gemini is default, deepgram is registered, models resolve", () => {
+  const providers = supportedSttProviders();
+  assert.deepEqual(providers, ["gemini", "deepgram"], "gemini stays first / default");
+  for (const provider of providers) {
+    assert.ok(defaultSttModel(provider), `${provider} has no default STT model`);
+  }
+  assert.equal(defaultSttModel("deepgram"), "nova-3");
+  assert.equal(defaultSttModel("whisper"), null);
 });

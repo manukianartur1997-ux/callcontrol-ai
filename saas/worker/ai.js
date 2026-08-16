@@ -285,8 +285,19 @@ async function runOpenAI({ apiKey, model, system, user, fetchImpl }) {
 const DRIVERS = { anthropic: runAnthropic, gemini: runGemini, openai: runOpenAI };
 
 // ---------------------------------------------------------------------------
-// Speech-to-text (Gemini only)
+// Speech-to-text (provider-dispatched: gemini, deepgram)
 // ---------------------------------------------------------------------------
+
+// Two STT backends behind one contract, same as the analysis drivers.
+//
+// Gemini audio is the cheapest path but does not truly diarize — it guesses
+// speaker turns from a prompt, which is unreliable and poisons per-speaker
+// scoring. Deepgram Nova-3 does real speaker turns for uk+ru, so orgs that need
+// trustworthy diarization pick it; Gemini stays the default/fallback.
+const DEFAULT_STT_MODELS = {
+  gemini: DEFAULT_MODELS.gemini,
+  deepgram: "nova-3"
+};
 
 // Transcripts are much longer than analyses; a 30-minute call fits well under
 // this, and Gemini Flash allows far more output than the analysis path needs.
@@ -320,19 +331,8 @@ const TRANSCRIBE_PROMPT = `Расшифруй запись телефонног�
 // STT via Gemini generateContent with an inline audio part. Same error
 // conventions as the analysis drivers: gemini_http_*, gemini_truncated,
 // gemini_empty_response. The caller (api.js) owns persistence and quota.
-export async function transcribeAudio({
-  provider = "gemini",
-  apiKey,
-  model,
-  audioB64,
-  mime,
-  fetchImpl = fetch
-}) {
-  if (provider !== "gemini") throw new Error(`unsupported_stt_provider_${provider}`);
-  if (!apiKey) throw new Error("api_key_missing");
-  if (!audioB64) throw new Error("audio_missing");
-
-  const chosenModel = model || DEFAULT_MODELS.gemini;
+async function runGeminiStt({ apiKey, model, audioB64, mime, fetchImpl }) {
+  const chosenModel = model || DEFAULT_STT_MODELS.gemini;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(chosenModel)}:generateContent`;
   const response = await fetchImpl(url, {
     method: "POST",
@@ -381,6 +381,124 @@ export async function transcribeAudio({
     tokensIn: data.usageMetadata?.promptTokenCount ?? null,
     tokensOut: data.usageMetadata?.candidatesTokenCount ?? null
   };
+}
+
+// Base64 → raw bytes. Deepgram wants the audio bytes as the request body, not a
+// JSON envelope, so we decode here rather than shipping the base64 string.
+function base64ToBytes(b64) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+// Turn a Deepgram diarized result into the same "Менеджер: …\nКлиент: …" shape
+// the analysis prompt expects. Prefer utterances (already speaker-grouped); fall
+// back to grouping the diarized word stream into consecutive same-speaker runs.
+//
+// Heuristic role mapping: the first speaker to talk is the internal side
+// (Менеджер), everyone else is the other party (Клиент). Speaker numbering is
+// not guaranteed to start at 0, so anchor on whoever speaks first rather than a
+// fixed index.
+function deepgramTranscript(data) {
+  const alt = data?.results?.channels?.[0]?.alternatives?.[0];
+  const utterances = data?.results?.utterances;
+
+  let segments = [];
+  if (Array.isArray(utterances) && utterances.length) {
+    segments = utterances.map((u) => ({
+      speaker: u?.speaker ?? 0,
+      text: String(u?.transcript || "").trim()
+    }));
+  } else {
+    const words = Array.isArray(alt?.words) ? alt.words : [];
+    for (const word of words) {
+      const speaker = word?.speaker ?? 0;
+      const token = word?.punctuated_word || word?.word || "";
+      const last = segments[segments.length - 1];
+      if (last && last.speaker === speaker) last.tokens.push(token);
+      else segments.push({ speaker, tokens: [token] });
+    }
+    segments = segments.map((s) => ({ speaker: s.speaker, text: s.tokens.join(" ").trim() }));
+  }
+
+  segments = segments.filter((s) => s.text);
+  if (!segments.length) return "";
+
+  const firstSpeaker = segments[0].speaker;
+  return segments
+    .map((s) => `${s.speaker === firstSpeaker ? "Менеджер" : "Клиент"}: ${s.text}`)
+    .join("\n");
+}
+
+// Deepgram Nova-3: real diarization for uk+ru with true speaker turns. Audio
+// bytes go in the request body with the source Content-Type; the key rides the
+// Authorization header (never the URL). Error convention: deepgram_http_<status>
+// with a short body snippet, never the audio or the key.
+async function runDeepgram({ apiKey, model, audioB64, mime, fetchImpl }) {
+  const chosenModel = model || DEFAULT_STT_MODELS.deepgram;
+  const params = new URLSearchParams({
+    model: chosenModel,
+    diarize: "true",
+    punctuate: "true",
+    smart_format: "true",
+    detect_language: "true"
+  });
+
+  const response = await fetchImpl(`https://api.deepgram.com/v1/listen?${params}`, {
+    method: "POST",
+    headers: {
+      "content-type": mime || "application/octet-stream",
+      authorization: `Token ${apiKey}`
+    },
+    body: base64ToBytes(audioB64)
+  });
+
+  if (!response.ok) throw new Error(`deepgram_http_${await readError(response)}`);
+  const data = await response.json();
+
+  const text = deepgramTranscript(data);
+  if (!text) throw new Error("transcription_empty");
+
+  const detected = data?.results?.channels?.[0]?.detected_language;
+  const duration = data?.metadata?.duration;
+
+  return {
+    text,
+    lang: detected ? String(detected).toLowerCase().slice(0, 8) : null,
+    tokensIn: null,
+    tokensOut: null,
+    provider: "deepgram",
+    minutes: typeof duration === "number" ? duration / 60 : null
+  };
+}
+
+const STT_DRIVERS = { gemini: runGeminiStt, deepgram: runDeepgram };
+
+// Provider-dispatched STT. An omitted provider defaults to gemini so existing
+// callers (api.js pipeline/recordings) are unchanged.
+export async function transcribeAudio({
+  provider = "gemini",
+  apiKey,
+  model,
+  audioB64,
+  mime,
+  fetchImpl = fetch
+}) {
+  const driver = STT_DRIVERS[provider];
+  if (!driver) throw new Error(`unsupported_stt_provider_${provider}`);
+  if (!apiKey) throw new Error("api_key_missing");
+  if (!audioB64) throw new Error("audio_missing");
+
+  return driver({ apiKey, model, audioB64, mime, fetchImpl });
+}
+
+export function supportedSttProviders() {
+  return Object.keys(STT_DRIVERS);
+}
+
+export function defaultSttModel(provider) {
+  return DEFAULT_STT_MODELS[provider] || null;
 }
 
 // ---------------------------------------------------------------------------
@@ -490,5 +608,7 @@ export const __testing = {
   TRANSCRIBE_PROMPT,
   toGeminiSchema,
   normalizeAnalysis,
-  buildUserPrompt
+  buildUserPrompt,
+  deepgramTranscript,
+  base64ToBytes
 };
