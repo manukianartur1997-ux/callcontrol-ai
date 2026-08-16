@@ -176,6 +176,7 @@ const uk = {
     calls: "Дзвінки",
     checklists: "Чеклісти",
     usage: "Використання",
+    billing: "Тарифікація",
     settings: "Налаштування",
     platform: "Платформа",
     profile: "Профіль"
@@ -380,6 +381,45 @@ const uk = {
         "На безкоштовному тарифі Google AI Studio дані можуть використовуватися " +
         "для навчання моделей — не завантажуйте чутливі дзвінки або " +
         "використовуйте платний тариф."
+    },
+
+    stt: {
+      title: "Розшифровка (STT)",
+      intro:
+        "Модель, що переводить запис у текст. Це окремо від моделі, яка потім " +
+        "оцінює розмову.",
+      activeLabel: "Зараз",
+      providerLabel: "Розшифровка",
+      providerNames: { gemini: "Gemini", deepgram: "Deepgram" },
+      providerOptions: {
+        gemini: "Gemini (дешевше)",
+        deepgram: "Deepgram (точніше розділяє спікерів)"
+      },
+      needsKey: "Gemini працює на вашому ключі Gemini. Для Deepgram потрібен окремий ключ.",
+      deepgramKeyWord: "ключ Deepgram:",
+      deepgramConfigured: "додано",
+      keyLabel: "Ключ Deepgram",
+      keyPlaceholder: "Вставте ключ Deepgram",
+      keyPlaceholderSet: "Ключ уже додано — вставте новий, щоб замінити",
+      keyHint: "Ми не зберігаємо ключ у відкритому вигляді, показуємо лише підказку.",
+      save: "Зберегти",
+      saving: "Зберігаємо…",
+      saved: "Збережено.",
+      unavailable: "Вибір розшифровки стане доступний після оновлення сервера."
+    },
+
+    dataProcessing: {
+      title: "Обробка даних",
+      intro:
+        "Коротко про приватність. Повні умови — у Договорі про обробку даних (DPA), " +
+        "який підписує компанія.",
+      controllerLine:
+        "Володілець даних — ваша компанія; CallControl обробляє їх за вашим дорученням (процесор).",
+      announcementLine:
+        "Клієнтів потрібно попереджати про запис розмови — цього вимагає закон.",
+      retentionLine: "Сирий текст розмов видаляється через {days} дн.; оцінки залишаються.",
+      retentionDefaultNote: "(за замовчуванням)",
+      dpaNote: "Перед підключенням узгодьте DPA з юристом вашої компанії."
     },
 
     team: {
@@ -615,6 +655,38 @@ const uk = {
     empty: "Поки що немає даних про використання.",
     loadError: "Не вдалося завантажити статистику використання.",
     unavailable: "Статистика використання стане доступна після оновлення сервера."
+  },
+
+  billing: {
+    title: "Тарифікація",
+    explainer: "Хвилини розмов і вартість за розрахунковими місяцями.",
+    currentMonth: "Поточний місяць",
+    statMinutes: "Хвилин розмов",
+    statCost: "Вартість",
+    rateCardTitle: "Тариф і зберігання",
+    rateLabel: "Тариф за хвилину",
+    ratePlaceholder: "напр. 2.5",
+    rateHint: "Ціна за одну хвилину розмови у валюті {currency}.",
+    retentionLabel: "Зберігання, днів",
+    retentionPlaceholder: "напр. 90",
+    retentionNote:
+      "Сирий текст розмов видаляється через {days} дн.; оцінки й показники залишаються.",
+    currencyLabel: "Валюта",
+    planLabel: "Тариф",
+    readOnlyNote: "Тариф і термін зберігання змінює лише власник кабінету.",
+    save: "Зберегти",
+    saving: "Зберігаємо…",
+    saved: "Збережено.",
+    badRate: "Введіть невід’ємне число.",
+    badRetention: "Введіть ціле число днів (від 1).",
+    historyTitle: "Історія за 6 місяців",
+    thPeriod: "Період",
+    thMinutes: "Хвилини",
+    thCalls: "Дзвінки",
+    thCost: "Вартість",
+    empty: "Поки що немає даних про тарифікацію.",
+    unavailable: "Тарифікація стане доступна після оновлення сервера.",
+    footnote: "Оцінка за тарифом пілота. Остаточний рахунок узгоджується окремо."
   },
 
   platform: {
@@ -855,6 +927,7 @@ const ru = {
     calls: "Звонки",
     checklists: "Чек-листы",
     usage: "Использование",
+    billing: "Тарификация",
     settings: "Настройки",
     platform: "Платформа",
     profile: "Профиль"
@@ -1059,6 +1132,45 @@ const ru = {
         "На бесплатном тарифе Google AI Studio данные могут использоваться для " +
         "обучения моделей — не включайте чувствительные звонки, либо используйте " +
         "платный тариф."
+    },
+
+    stt: {
+      title: "Расшифровка (STT)",
+      intro:
+        "Модель, которая переводит запись в текст. Это отдельно от модели, " +
+        "которая потом оценивает разговор.",
+      activeLabel: "Сейчас",
+      providerLabel: "Расшифровка",
+      providerNames: { gemini: "Gemini", deepgram: "Deepgram" },
+      providerOptions: {
+        gemini: "Gemini (дешевле)",
+        deepgram: "Deepgram (точнее разделяет спикеров)"
+      },
+      needsKey: "Gemini работает на вашем ключе Gemini. Для Deepgram нужен отдельный ключ.",
+      deepgramKeyWord: "ключ Deepgram:",
+      deepgramConfigured: "добавлен",
+      keyLabel: "Ключ Deepgram",
+      keyPlaceholder: "Вставьте ключ Deepgram",
+      keyPlaceholderSet: "Ключ уже добавлен — вставьте новый, чтобы заменить",
+      keyHint: "Мы не храним ключ в открытом виде, показываем только подсказку.",
+      save: "Сохранить",
+      saving: "Сохраняем…",
+      saved: "Сохранено.",
+      unavailable: "Выбор расшифровки станет доступен после обновления сервера."
+    },
+
+    dataProcessing: {
+      title: "Обработка данных",
+      intro:
+        "Коротко о приватности. Полные условия — в Договоре об обработке данных (DPA), " +
+        "который подписывает компания.",
+      controllerLine:
+        "Владелец данных — ваша компания; CallControl обрабатывает их по вашему поручению (процессор).",
+      announcementLine:
+        "Клиентов нужно предупреждать о записи разговора — этого требует закон.",
+      retentionLine: "Сырой текст разговоров удаляется через {days} дн.; оценки остаются.",
+      retentionDefaultNote: "(по умолчанию)",
+      dpaNote: "Перед подключением согласуйте DPA с юристом вашей компании."
     },
 
     team: {
@@ -1293,6 +1405,38 @@ const ru = {
     empty: "Пока нет данных об использовании.",
     loadError: "Не удалось загрузить статистику использования.",
     unavailable: "Статистика использования станет доступна после обновления сервера."
+  },
+
+  billing: {
+    title: "Тарификация",
+    explainer: "Минуты разговоров и стоимость по расчётным месяцам.",
+    currentMonth: "Текущий месяц",
+    statMinutes: "Минут разговоров",
+    statCost: "Стоимость",
+    rateCardTitle: "Тариф и хранение",
+    rateLabel: "Тариф за минуту",
+    ratePlaceholder: "напр. 2.5",
+    rateHint: "Цена за одну минуту разговора в валюте {currency}.",
+    retentionLabel: "Хранение, дней",
+    retentionPlaceholder: "напр. 90",
+    retentionNote:
+      "Сырой текст разговоров удаляется через {days} дн.; оценки и показатели остаются.",
+    currencyLabel: "Валюта",
+    planLabel: "Тариф",
+    readOnlyNote: "Тариф и срок хранения меняет только владелец кабинета.",
+    save: "Сохранить",
+    saving: "Сохраняем…",
+    saved: "Сохранено.",
+    badRate: "Введите неотрицательное число.",
+    badRetention: "Введите целое число дней (от 1).",
+    historyTitle: "История за 6 месяцев",
+    thPeriod: "Период",
+    thMinutes: "Минуты",
+    thCalls: "Звонки",
+    thCost: "Стоимость",
+    empty: "Пока нет данных по тарификации.",
+    unavailable: "Тарификация станет доступна после обновления сервера.",
+    footnote: "Оценка по тарифу пилота. Итоговый счёт согласуется отдельно."
   },
 
   platform: {
@@ -1534,6 +1678,7 @@ const en = {
     calls: "Calls",
     checklists: "Checklists",
     usage: "Usage",
+    billing: "Billing",
     settings: "Settings",
     platform: "Platform",
     profile: "Profile"
@@ -1737,6 +1882,45 @@ const en = {
       warning:
         "On the free Google AI Studio tier your data may be used for model " +
         "training — don't upload sensitive calls, or use a paid tier."
+    },
+
+    stt: {
+      title: "Transcription (STT)",
+      intro:
+        "The model that turns the recording into text. Separate from the model " +
+        "that later scores the call.",
+      activeLabel: "Current",
+      providerLabel: "Transcription",
+      providerNames: { gemini: "Gemini", deepgram: "Deepgram" },
+      providerOptions: {
+        gemini: "Gemini (cheaper)",
+        deepgram: "Deepgram (better speaker separation)"
+      },
+      needsKey: "Gemini runs on your Gemini key. Deepgram needs its own key.",
+      deepgramKeyWord: "Deepgram key:",
+      deepgramConfigured: "added",
+      keyLabel: "Deepgram key",
+      keyPlaceholder: "Paste the Deepgram key",
+      keyPlaceholderSet: "A key is set — paste a new one to replace it",
+      keyHint: "We never store the key in plain text, only a hint is shown.",
+      save: "Save",
+      saving: "Saving…",
+      saved: "Saved.",
+      unavailable: "The transcription choice becomes available after the server update."
+    },
+
+    dataProcessing: {
+      title: "Data processing",
+      intro:
+        "A short privacy summary. The full terms live in the Data Processing " +
+        "Agreement (DPA) the company signs.",
+      controllerLine:
+        "Your company is the data controller; CallControl processes the data on your instructions (processor).",
+      announcementLine:
+        "Callers must be told the call is recorded — the law requires it.",
+      retentionLine: "Raw call text is deleted after {days} days; the scores are kept.",
+      retentionDefaultNote: "(default)",
+      dpaNote: "Have your company's lawyer review the DPA before going live."
     },
 
     team: {
@@ -1971,6 +2155,38 @@ const en = {
     empty: "No usage data yet.",
     loadError: "Could not load usage statistics.",
     unavailable: "Usage statistics become available after the server update."
+  },
+
+  billing: {
+    title: "Billing",
+    explainer: "Talk-time minutes and cost per billing month.",
+    currentMonth: "Current month",
+    statMinutes: "Talk minutes",
+    statCost: "Cost",
+    rateCardTitle: "Rate and retention",
+    rateLabel: "Rate per minute",
+    ratePlaceholder: "e.g. 2.5",
+    rateHint: "Price of one talk minute in {currency}.",
+    retentionLabel: "Retention, days",
+    retentionPlaceholder: "e.g. 90",
+    retentionNote:
+      "Raw call text is deleted after {days} days; scores and metrics are kept.",
+    currencyLabel: "Currency",
+    planLabel: "Plan",
+    readOnlyNote: "Only the workspace owner changes the rate and retention.",
+    save: "Save",
+    saving: "Saving…",
+    saved: "Saved.",
+    badRate: "Enter a non-negative number.",
+    badRetention: "Enter a whole number of days (1 or more).",
+    historyTitle: "6-month history",
+    thPeriod: "Period",
+    thMinutes: "Minutes",
+    thCalls: "Calls",
+    thCost: "Cost",
+    empty: "No billing data yet.",
+    unavailable: "Billing becomes available after the server update.",
+    footnote: "Pilot-rate estimate. The final invoice is agreed separately."
   },
 
   platform: {

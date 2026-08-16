@@ -17,6 +17,7 @@ export function Shell({ me, active, route, onSwitchOrg, onSignOut, children }) {
   if (canSettings) {
     navItems.push({ page: "checklists", href: "#/checklists", label: copy.nav.checklists });
     navItems.push({ page: "usage", href: "#/usage", label: copy.nav.usage });
+    navItems.push({ page: "billing", href: "#/billing", label: copy.nav.billing });
     navItems.push({ page: "settings", href: "#/settings", label: copy.nav.settings });
   }
   // Platform super-admin surface — a visually distinct god-view entry, only

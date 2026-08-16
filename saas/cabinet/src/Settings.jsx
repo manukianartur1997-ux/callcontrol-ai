@@ -9,12 +9,15 @@ import { supabase } from "./supabase.js";
 import {
   createMember,
   fetchAiKey,
+  fetchBilling,
   fetchIntegrations,
   fetchIntegrationCredentials,
+  fetchStt,
   fetchTelegramRecipients,
   saveAiKey,
   saveIntegrationCredentials,
   saveOrgSettings,
+  saveStt,
   saveTelegramRecipients,
   rotateWebhookToken
 } from "./api.js";
@@ -34,10 +37,12 @@ export function Settings({ org }) {
     <div className="page">
       <h1 className="page-title">{t.title}</h1>
       {org.role === "owner" ? <AiKeyCard org={org} /> : null}
+      {org.role === "owner" ? <SttCard org={org} /> : null}
       {org.role === "owner" ? <OrgSettingsCard org={org} /> : null}
       <TeamCard org={org} />
       <TelephonyCard org={org} />
       {org.role === "owner" || org.role === "admin" ? <TelegramCard org={org} /> : null}
+      <DataProcessingCard org={org} />
     </div>
   );
 }
@@ -262,6 +267,152 @@ function AiKeyCard({ org }) {
       </form>
 
       <p className="warning">{t.warning}</p>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// (a2) STT provider — owner only. The transcription backend is separate from
+// the analysis LLM: Gemini is cheaper and reuses the org's existing Gemini key
+// (nothing extra to paste); Deepgram gives real speaker separation but needs
+// its own key. GET/PUT /orgs/:id/stt is built in parallel with the Worker, so
+// this degrades on 404/501 (endpoint absent) and 503 migration_required
+// (pre-0005). The browser only ever sees a key hint, never the stored value.
+// ---------------------------------------------------------------------------
+const STT_PROVIDERS = ["gemini", "deepgram"];
+
+function SttCard({ org }) {
+  const t = copy.settings.stt;
+  const { loading, data, error, reload } = useAsync(async () => {
+    try {
+      const raw = await fetchStt(org.org_id);
+      return { state: raw?.stt || raw || {} };
+    } catch (err) {
+      if (err && (err.status === 404 || err.status === 501)) return { unavailable: true };
+      if (err && err.error === "migration_required") return { migration: true };
+      throw err;
+    }
+  }, [org.org_id]);
+
+  const [provider, setProvider] = useState("gemini");
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [saved, setSaved] = useState(false);
+  const [migrationNeeded, setMigrationNeeded] = useState(false);
+
+  const state = data?.state || {};
+  const activeProvider = STT_PROVIDERS.includes(state.provider) ? state.provider : "gemini";
+  const deepgramHint = state.deepgram_hint || state.deepgram_key_hint || null;
+  const deepgramConfigured = Boolean(state.deepgram_configured || deepgramHint);
+
+  // Prefill the select from the active provider once state arrives.
+  useEffect(() => {
+    if (data?.state && STT_PROVIDERS.includes(data.state.provider)) {
+      setProvider(data.state.provider);
+    }
+  }, [data]);
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setSaveError(null);
+    setSaved(false);
+    setMigrationNeeded(false);
+    try {
+      const body = { provider };
+      // A Deepgram key is only sent when the field was filled; switching back
+      // to Gemini never needs one and reuses the org's Gemini key.
+      if (provider === "deepgram" && key.trim()) body.key = key.trim();
+      await saveStt(org.org_id, body);
+      setKey(""); // never keep the secret in state longer than needed
+      setSaved(true);
+      reload();
+    } catch (err) {
+      if (err && err.error === "migration_required") setMigrationNeeded(true);
+      else setSaveError(err);
+    }
+    setBusy(false);
+  }
+
+  return (
+    <Card title={t.title}>
+      <p className="muted">{t.intro}</p>
+      {loading ? (
+        <SkeletonBlock lines={2} />
+      ) : error ? (
+        <ErrorBox error={error} onRetry={reload} />
+      ) : data.unavailable ? (
+        <p className="warning">{t.unavailable}</p>
+      ) : data.migration ? (
+        <p className="warning">{copy.settings.orgSettings.migrationRequired}</p>
+      ) : (
+        <>
+          <p className="ai-current">
+            {t.activeLabel}: <strong>{t.providerNames[activeProvider] || activeProvider}</strong>
+            {deepgramConfigured ? (
+              <>
+                {" · "}
+                {t.deepgramKeyWord}{" "}
+                <span className="mono">{deepgramHint || t.deepgramConfigured}</span>
+              </>
+            ) : null}
+          </p>
+
+          <form className="ai-form" onSubmit={submit}>
+            <label className="field">
+              <span className="label">{t.providerLabel}</span>
+              <select
+                className="input"
+                value={provider}
+                onChange={(e) => setProvider(e.target.value)}
+                disabled={busy}
+              >
+                {STT_PROVIDERS.map((p) => (
+                  <option key={p} value={p}>
+                    {t.providerOptions[p]}
+                  </option>
+                ))}
+              </select>
+              <span className="field-hint">{t.needsKey}</span>
+            </label>
+
+            {provider === "deepgram" ? (
+              <label className="field">
+                <span className="label">{t.keyLabel}</span>
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete="off"
+                  placeholder={deepgramConfigured ? t.keyPlaceholderSet : t.keyPlaceholder}
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                  disabled={busy}
+                />
+                <span className="field-hint">{t.keyHint}</span>
+              </label>
+            ) : null}
+
+            {migrationNeeded ? (
+              <p className="warning">{copy.settings.orgSettings.migrationRequired}</p>
+            ) : null}
+            {saveError ? <div className="form-error">{humanApiError(saveError)}</div> : null}
+            {saved && !saveError ? <div className="form-success">{t.saved}</div> : null}
+
+            <div className="form-actions">
+              <button type="submit" className="btn btn-primary" disabled={busy}>
+                {busy ? (
+                  <>
+                    <Spinner small /> {t.saving}
+                  </>
+                ) : (
+                  t.save
+                )}
+              </button>
+            </div>
+          </form>
+        </>
+      )}
     </Card>
   );
 }
@@ -1057,6 +1208,47 @@ function TelegramCard({ org }) {
           </details>
         </>
       )}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// (e) Data processing / privacy posture — visible to everyone who can reach
+// Settings. Plain-language summary of the DPA: who is controller vs processor,
+// the call-recording announcement duty, and how long raw text is kept before
+// deletion. The retention number is read from /orgs/:id/billing when available
+// (default 90 shown otherwise); this card never edits anything — the exact
+// window is set on the Billing screen, the legal detail lives in the DPA.
+// ---------------------------------------------------------------------------
+function DataProcessingCard({ org }) {
+  const t = copy.settings.dataProcessing;
+  const { data } = useAsync(async () => {
+    try {
+      const raw = await fetchBilling(org.org_id);
+      const days = raw?.retention_days;
+      return { days: Number.isFinite(Number(days)) ? Number(days) : null };
+    } catch {
+      // Billing may 404/501/503 while the Worker ships — fall back to the
+      // documented default rather than failing this informational card.
+      return { days: null };
+    }
+  }, [org.org_id]);
+
+  const days = data?.days ?? 90;
+  const known = data && data.days != null;
+
+  return (
+    <Card title={t.title}>
+      <p className="muted">{t.intro}</p>
+      <ul className="dp-list">
+        <li>{t.controllerLine}</li>
+        <li>{t.announcementLine}</li>
+        <li>
+          {t.retentionLine.replace("{days}", days)}
+          {known ? null : ` ${t.retentionDefaultNote}`}
+        </li>
+      </ul>
+      <p className="field-hint">{t.dpaNote}</p>
     </Card>
   );
 }

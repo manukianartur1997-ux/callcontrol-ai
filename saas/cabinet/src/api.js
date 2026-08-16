@@ -89,6 +89,33 @@ export function saveAiKey(orgId, body) {
   return apiFetch(`/orgs/${orgId}/ai-key`, { method: "PUT", body });
 }
 
+// STT (speech-to-text) provider choice + Deepgram key. Reuses the ai-key
+// credential pattern: GET only ever returns { provider, deepgram_configured,
+// deepgram_hint } — the browser never sees a stored key. PUT accepts
+// { provider: "gemini"|"deepgram", key? } (key only needed for Deepgram).
+// Built in parallel with the Worker, so callers degrade on 404/501 (endpoint
+// not shipped) and on 503 { error: "migration_required" } (pre-0005 schema).
+export function fetchStt(orgId) {
+  return apiFetch(`/orgs/${orgId}/stt`);
+}
+
+export function saveStt(orgId, body) {
+  return apiFetch(`/orgs/${orgId}/stt`, { method: "PUT", body });
+}
+
+// Billing: current-month minutes/cost, a 6-month history and the editable
+// per-minute rate + retention window. GET/PUT /orgs/:id/billing. Answers 503
+// { error: "migration_required" } until migration 0005 is applied, and
+// 404/501 until the Worker endpoint ships — the Billing screen degrades on
+// both. PUT accepts { rate_per_minute?, retention_days? } (owner only).
+export function fetchBilling(orgId) {
+  return apiFetch(`/orgs/${orgId}/billing`);
+}
+
+export function saveBilling(orgId, body) {
+  return apiFetch(`/orgs/${orgId}/billing`, { method: "PUT", body });
+}
+
 export function fetchIntegrations(orgId) {
   return apiFetch(`/orgs/${orgId}/integrations`);
 }

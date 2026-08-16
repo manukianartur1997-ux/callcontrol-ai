@@ -27,6 +27,7 @@ import { NoAccess } from "./NoAccess.jsx";
 import { NewCallModal } from "./NewCallModal.jsx";
 import { Checklists } from "./Checklists.jsx";
 import { Usage } from "./Usage.jsx";
+import { Billing } from "./Billing.jsx";
 import { Platform } from "./Platform.jsx";
 
 export function App() {
@@ -181,6 +182,7 @@ function Workspace({ me, session, onSignOut }) {
     route.page === "profile" ||
     (route.page === "checklists" && canSettings) ||
     (route.page === "usage" && canSettings) ||
+    (route.page === "billing" && canSettings) ||
     (route.page === "settings" && canSettings) ||
     (route.page === "platform" && isPlatformAdmin);
   useEffect(() => {
@@ -205,6 +207,8 @@ function Workspace({ me, session, onSignOut }) {
     content = <Checklists org={active} />;
   } else if (route.page === "usage") {
     content = <Usage org={active} />;
+  } else if (route.page === "billing") {
+    content = <Billing org={active} />;
   } else if (route.page === "platform") {
     content = <Platform orgId={route.id} />;
   } else if (route.page === "settings") {
