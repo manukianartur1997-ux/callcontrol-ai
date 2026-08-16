@@ -659,6 +659,66 @@ test("webhook: an oversized body is rejected before parsing", async () => {
   );
 });
 
+// A ctx whose waitUntil captures the backgrounded promise — the production
+// path the old tests never exercised (no ctx was ever passed, and the calls
+// insert returned no representation body, so the fire gate could not run).
+function ctxSpy() {
+  const captured = [];
+  return { ctx: { waitUntil: (p) => captured.push(p) }, captured };
+}
+
+test("webhook e2e: a fresh ANSWERED call fires the pipeline via ctx.waitUntil, after acking", async () => {
+  const mock = createFetchMock();
+  // The insert MUST echo a representation row (registered first so it wins) so
+  // the worker can tell a fresh insert from a redelivered duplicate.
+  mock.on("POST", "/rest/v1/calls", (record) => ({ status: 201, body: [{ id: CALL_ID, ...record.body }] }));
+  seedWebhook(mock, "ringostat", RINGO_TOKEN);
+
+  const { ctx, captured } = ctxSpy();
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/telephony/ringostat/${RINGO_TOKEN}`, RINGOSTAT_COMPLETED),
+    ctx
+  );
+
+  // The ack is returned immediately; the pipeline was handed to waitUntil, not
+  // awaited — so the PBX never blocks on the multi-second analysis.
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: true });
+  assert.equal(captured.length, 1, "the answered call scheduled exactly one background pipeline");
+
+  // Draining it must not reject (runIngestPipeline swallows its own errors).
+  await Promise.allSettled(captured);
+});
+
+test("webhook e2e: an UNANSWERED call is acked but never fires the pipeline", async () => {
+  const mock = createFetchMock();
+  mock.on("POST", "/rest/v1/calls", (record) => ({ status: 201, body: [{ id: CALL_ID, ...record.body }] }));
+  seedWebhook(mock, "ringostat", RINGO_TOKEN);
+
+  const { ctx, captured } = ctxSpy();
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/telephony/ringostat/${RINGO_TOKEN}`, { ...RINGOSTAT_COMPLETED, status: "NO ANSWER" }),
+    ctx
+  );
+  assert.equal(res.status, 200);
+  assert.equal(captured.length, 0, "an unanswered call wastes no STT/quota");
+});
+
+test("webhook e2e: a redelivered duplicate (empty representation) does not re-fire the pipeline", async () => {
+  const mock = createFetchMock();
+  // ignore-duplicates → the second insert returns an EMPTY representation array.
+  mock.on("POST", "/rest/v1/calls", { status: 201, body: [] });
+  seedWebhook(mock, "ringostat", RINGO_TOKEN);
+
+  const { ctx, captured } = ctxSpy();
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/telephony/ringostat/${RINGO_TOKEN}`, RINGOSTAT_COMPLETED),
+    ctx
+  );
+  assert.equal(res.status, 200);
+  assert.equal(captured.length, 0, "a duplicate delivery must fire the pipeline exactly zero extra times");
+});
+
 // ---------------------------------------------------------------------------
 // AI key management
 // ---------------------------------------------------------------------------
