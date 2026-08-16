@@ -1,0 +1,93 @@
+-- ===========================================================================
+-- CallControl — APPLY THIS in the Supabase SQL editor (one paste, Run once).
+--
+-- This is migrations 0004 (growth) + 0005 (billing/retention) concatenated,
+-- for the LIVE project where 0001-0003 are ALREADY applied. Do NOT paste
+-- ALL_IN_ONE.sql on the live project — it re-creates the 0001-0003 policies and
+-- would error on "policy already exists". This file is safe to run and is
+-- re-runnable: every policy is dropped-if-exists first, tables/columns use
+-- IF NOT EXISTS. Until this runs, billing/retention/telegram features answer
+-- 503 migration_required and org seeding falls back to 2 legacy telephony kinds.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- 0004 · 1. Telephony: extend the allowed integration kinds (top-5 UA).
+--    KEEP THIS LIST IN SYNC with PROVIDERS in saas/worker/telephony.js.
+-- ---------------------------------------------------------------------------
+alter table integrations drop constraint if exists integrations_kind_check;
+alter table integrations
+  add constraint integrations_kind_check
+  check (kind in ('ringostat', 'binotel', 'phonet', 'unitalk', 'streamtele'));
+
+-- ---------------------------------------------------------------------------
+-- 0004 · 2. Telegram delivery: per-call feedback and the daily digest.
+-- ---------------------------------------------------------------------------
+create table if not exists telegram_recipients (
+  id          uuid primary key default gen_random_uuid(),
+  org_id      uuid not null references organizations (id) on delete cascade,
+  chat_id     text not null check (chat_id ~ '^-?[0-9]{5,20}$'),
+  kind        text not null check (kind in ('per_call', 'daily')),
+  label       text,
+  created_at  timestamptz not null default now(),
+  unique (org_id, chat_id, kind)
+);
+
+alter table telegram_recipients enable row level security;
+alter table telegram_recipients force row level security;
+
+drop policy if exists telegram_select on telegram_recipients;
+create policy telegram_select on telegram_recipients for select to authenticated
+  using (app.is_org_wide(org_id));
+drop policy if exists telegram_write on telegram_recipients;
+create policy telegram_write on telegram_recipients for all to authenticated
+  using (app.is_org_wide(org_id)) with check (app.is_org_wide(org_id));
+
+-- ---------------------------------------------------------------------------
+-- 0004 · 3. Organization settings the dashboard needs.
+-- ---------------------------------------------------------------------------
+alter table organizations
+  add column if not exists avg_deal_amount numeric check (avg_deal_amount is null or avg_deal_amount >= 0),
+  add column if not exists ui_language text not null default 'uk'
+    check (ui_language in ('uk', 'ru', 'en'));
+
+-- ---------------------------------------------------------------------------
+-- 0005 · 1. Billing settings on the organization.
+-- ---------------------------------------------------------------------------
+alter table organizations
+  add column if not exists billing_plan text not null default 'payg'
+    check (billing_plan in ('payg', 'trial', 'custom')),
+  add column if not exists rate_per_minute numeric check (rate_per_minute is null or rate_per_minute >= 0),
+  add column if not exists billing_currency text not null default 'UAH'
+    check (billing_currency in ('UAH', 'USD', 'EUR')),
+  add column if not exists retention_days integer not null default 90
+    check (retention_days between 1 and 3650);
+
+-- ---------------------------------------------------------------------------
+-- 0005 · 2. Usage ledger: one billable line per analysed call (talk-minutes).
+-- ---------------------------------------------------------------------------
+create table if not exists usage_ledger (
+  id          uuid primary key default gen_random_uuid(),
+  org_id      uuid not null references organizations (id) on delete cascade,
+  call_id     uuid not null references calls (id) on delete cascade,
+  minutes     numeric not null check (minutes >= 0),
+  rate        numeric not null check (rate >= 0),
+  currency    text not null default 'UAH',
+  cost        numeric not null check (cost >= 0),
+  created_at  timestamptz not null default now(),
+  unique (call_id)
+);
+
+create index if not exists usage_ledger_org_created on usage_ledger (org_id, created_at desc);
+
+alter table usage_ledger enable row level security;
+alter table usage_ledger force row level security;
+
+drop policy if exists usage_ledger_select on usage_ledger;
+create policy usage_ledger_select on usage_ledger for select to authenticated
+  using (app.is_org_wide(org_id));
+
+-- ---------------------------------------------------------------------------
+-- 0005 · 3. Retention marker on transcripts (idempotent cleanup).
+-- ---------------------------------------------------------------------------
+alter table transcripts
+  add column if not exists redacted_at timestamptz;
