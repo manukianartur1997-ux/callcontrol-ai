@@ -605,7 +605,18 @@ export const PROVIDERS = [
       }
     ],
     managerMappingHint:
-      "Исходящие: сотрудник определяется по staffid из вебхука — укажите его в поле «Внутренний номер» участника. Входящие: добавьте в вебхук параметр с внутренним номером ответившего. Рекомендуем также включить в вебхук calldate_timestamp_micros — время звонка перестанет зависеть от часового пояса."
+      "Исходящие: сотрудник определяется по staffid из вебхука — укажите его в поле «Внутренний номер» участника. Входящие: добавьте в вебхук параметр с внутренним номером ответившего. Рекомендуем также включить в вебхук calldate_timestamp_micros — время звонка перестанет зависеть от часового пояса.",
+    i18n: {
+      titleKey: "providers.ringostat.title",
+      mappingHintKey: "providers.ringostat.mappingHint",
+      fields: [
+        {
+          key: "apiKey",
+          labelKey: "providers.ringostat.fields.apiKey.label",
+          placeholderKey: "providers.ringostat.fields.apiKey.placeholder"
+        }
+      ]
+    }
   },
   {
     kind: "binotel",
@@ -618,7 +629,23 @@ export const PROVIDERS = [
       { key: "apiSecret", label: "API-секрет", secret: true, placeholder: "Выдаёт support@binotel.ua" }
     ],
     managerMappingHint:
-      "Сотрудник определяется по internalNumber из вебхука — укажите его в поле «Внутренний номер» участника. При переводах берётся участник historyData с disposition=ANSWER; запасной вариант — e-mail из employeeData."
+      "Сотрудник определяется по internalNumber из вебхука — укажите его в поле «Внутренний номер» участника. При переводах берётся участник historyData с disposition=ANSWER; запасной вариант — e-mail из employeeData.",
+    i18n: {
+      titleKey: "providers.binotel.title",
+      mappingHintKey: "providers.binotel.mappingHint",
+      fields: [
+        {
+          key: "apiKey",
+          labelKey: "providers.binotel.fields.apiKey.label",
+          placeholderKey: "providers.binotel.fields.apiKey.placeholder"
+        },
+        {
+          key: "apiSecret",
+          labelKey: "providers.binotel.fields.apiSecret.label",
+          placeholderKey: "providers.binotel.fields.apiSecret.placeholder"
+        }
+      ]
+    }
   },
   {
     kind: "phonet",
@@ -637,7 +664,23 @@ export const PROVIDERS = [
       { key: "apiKey", label: "API-ключ", secret: true, placeholder: "Ключ из кабинета Phonet" }
     ],
     managerMappingHint:
-      "Сотрудник определяется по внутреннему номеру (leg.ext, напр. «001») — укажите его в поле «Внутренний номер» участника. Для групп и IVR смотрится история переводов; запасной вариант — e-mail сотрудника из /rest/users."
+      "Сотрудник определяется по внутреннему номеру (leg.ext, напр. «001») — укажите его в поле «Внутренний номер» участника. Для групп и IVR смотрится история переводов; запасной вариант — e-mail сотрудника из /rest/users.",
+    i18n: {
+      titleKey: "providers.phonet.title",
+      mappingHintKey: "providers.phonet.mappingHint",
+      fields: [
+        {
+          key: "accountDomain",
+          labelKey: "providers.phonet.fields.accountDomain.label",
+          placeholderKey: "providers.phonet.fields.accountDomain.placeholder"
+        },
+        {
+          key: "apiKey",
+          labelKey: "providers.phonet.fields.apiKey.label",
+          placeholderKey: "providers.phonet.fields.apiKey.placeholder"
+        }
+      ]
+    }
   },
   {
     kind: "unitalk",
@@ -656,7 +699,18 @@ export const PROVIDERS = [
       }
     ],
     managerMappingHint:
-      "Входящие: сотрудник определяется по внутренней линии из call.to — укажите её в поле «Внутренний номер» участника. Исходящие: линия оператора ожидается в call.from (не подтверждено документацией — проверьте на первых звонках)."
+      "Входящие: сотрудник определяется по внутренней линии из call.to — укажите её в поле «Внутренний номер» участника. Исходящие: линия оператора ожидается в call.from (не подтверждено документацией — проверьте на первых звонках).",
+    i18n: {
+      titleKey: "providers.unitalk.title",
+      mappingHintKey: "providers.unitalk.mappingHint",
+      fields: [
+        {
+          key: "apiKey",
+          labelKey: "providers.unitalk.fields.apiKey.label",
+          placeholderKey: "providers.unitalk.fields.apiKey.placeholder"
+        }
+      ]
+    }
   },
   {
     kind: "streamtele",
@@ -675,9 +729,28 @@ export const PROVIDERS = [
       }
     ],
     managerMappingHint:
-      "Входящие: to = внутренняя линия сотрудника — укажите её в поле «Внутренний номер» участника. Исходящие: from = внутренняя линия. Номера линий — в «Администрирование → Сотрудники»; имени сотрудника в вебхуке нет."
+      "Входящие: to = внутренняя линия сотрудника — укажите её в поле «Внутренний номер» участника. Исходящие: from = внутренняя линия. Номера линий — в «Администрирование → Сотрудники»; имени сотрудника в вебхуке нет.",
+    // MANIFEST i18n CONTRACT: values are dot-paths under providers.<kind>.*; the
+    // cabinet resolves each as copyGet(labelKey) ?? label. The Russian literals
+    // above stay as fallbacks. The cabinet agent owns the providers.streamtele.*
+    // subtree in the uk/ru/en dictionaries.
+    i18n: {
+      titleKey: "providers.streamtele.title",
+      mappingHintKey: "providers.streamtele.mappingHint",
+      fields: [
+        {
+          key: "apiKey",
+          labelKey: "providers.streamtele.fields.apiKey.label",
+          placeholderKey: "providers.streamtele.fields.apiKey.placeholder"
+        }
+      ]
+    }
   }
 ];
+
+// Advertised kinds, in manifest order — the pipeline and cabinet iterate this
+// instead of re-deriving it. Excludes aliases (e.g. legacy 'nextel').
+export const PROVIDER_KINDS = PROVIDERS.map((p) => p.kind);
 
 // ---------------------------------------------------------------------------
 // Recording retrieval
@@ -740,6 +813,253 @@ export function phonetRecordingUrl({ accountDomain, uuid, channel = "" }) {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-pipeline recording fetch — normalized event → { audioB64, mime } | null
+// ---------------------------------------------------------------------------
+
+// Downloaded audio is streamed inline into the STT step (base64-in-JSON), so a
+// runaway file would blow the request budget: hard-cap at ~18MB, matching the
+// worker's audio upload envelope. Bigger → null (skip, never throw).
+const MAX_AUDIO_BYTES = 18 * 1024 * 1024;
+
+// Reads a single response header across both a real Headers object and the
+// plain-object headers the test fetch-mock returns. Never logs the value.
+function readHeader(response, name) {
+  const headers = response && response.headers;
+  if (!headers) return "";
+  if (typeof headers.get === "function") return headers.get(name) || "";
+  const lower = String(name).toLowerCase();
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === lower) return headers[key] || "";
+  }
+  return "";
+}
+
+// audio/* is the norm; some CDNs serve recordings as octet-stream. A textual
+// content-type (text/html, application/json, …) means an error page, not audio.
+function isAudioMime(mime) {
+  if (!mime) return true; // absent → assume audio (Ringostat default)
+  return (
+    mime.startsWith("audio/") ||
+    mime === "application/octet-stream" ||
+    mime === "binary/octet-stream"
+  );
+}
+
+// btoa on a binary string, chunked so a large buffer never overflows the
+// String.fromCharCode argument list. Mirrors crypto.js's b64encode.
+function bytesToBase64(bytes) {
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+// SSRF guard for URLs that arrive inside a webhook payload (ringostat/unitalk/
+// streamtele) — an attacker who controls the PBX body could point the fetch at
+// our own metadata endpoint or an intranet host. Require https and reject any
+// hostname literal that sits in an obvious loopback / private / link-local
+// range. This is a hostname string check only (no DNS resolution): it stops the
+// blatant cases the dossier calls out and is intentionally conservative.
+function isSafePublicUrl(rawUrl) {
+  let parsed;
+  try {
+    parsed = new URL(String(rawUrl || ""));
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  const host = parsed.hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+  if (!host) return false;
+  if (host === "localhost" || host.endsWith(".localhost")) return false;
+  if (host === "0.0.0.0" || host === "::" || host === "::1") return false;
+  if (host.startsWith("127.")) return false; // loopback
+  if (host.startsWith("10.")) return false; // private class A
+  if (host.startsWith("192.168.")) return false; // private class C
+  if (host.startsWith("169.254.")) return false; // link-local (incl. cloud metadata)
+  const m172 = host.match(/^172\.(\d{1,3})\./); // 172.16.0.0 – 172.31.255.255
+  if (m172) {
+    const octet = Number(m172[1]);
+    if (octet >= 16 && octet <= 31) return false;
+  }
+  // IPv6 unique-local (fc00::/7) and link-local (fe80::/10) literals.
+  if (host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) return false;
+  return true;
+}
+
+// GET a URL and return { audioB64, mime } or null. Enforces the size cap and,
+// when checkSsrf is set, the private-host guard before any network call. Never
+// logs the bytes, the URL or any header value.
+async function downloadAudio(
+  url,
+  { fetchImpl = fetch, headers = {}, checkSsrf = false, defaultMime = "audio/mpeg" } = {}
+) {
+  if (checkSsrf && !isSafePublicUrl(url)) return null;
+
+  const response = await fetchImpl(url, { method: "GET", headers });
+  if (!response || !response.ok) return null;
+
+  const contentType = readHeader(response, "content-type");
+  const mime = contentType.split(";")[0].trim().toLowerCase() || defaultMime;
+  if (!isAudioMime(mime)) return null; // an error page, not a recording
+
+  // Early-out on the advertised length before buffering the body when possible.
+  const advertised = Number(readHeader(response, "content-length"));
+  if (Number.isFinite(advertised) && advertised > MAX_AUDIO_BYTES) return null;
+
+  const buffer = await response.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  if (bytes.byteLength === 0 || bytes.byteLength > MAX_AUDIO_BYTES) return null;
+
+  return { audioB64: bytesToBase64(bytes), mime };
+}
+
+// Finds the first url-looking string among a raw payload's top-level values —
+// Stream Telecom's record link is UNVERIFIED, so its field name may drift.
+function findUrlInRaw(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  for (const value of Object.values(raw)) {
+    if (typeof value === "string" && looksLikeUrl(value)) return value;
+  }
+  return null;
+}
+
+// Ringostat: the signed recording_wav link travels inside the webhook, no
+// credentials needed. Webhook-sourced → SSRF-checked.
+async function fetchRingostatRecording(event, _credentials, fetchImpl) {
+  try {
+    const url = event.recordingUrl;
+    if (!url) return null;
+    return await downloadAudio(url, { fetchImpl, checkSsrf: true });
+  } catch {
+    return null;
+  }
+}
+
+// Binotel: two-step. POST for a temporary (15-min) link, then GET it. The link
+// is issued by Binotel's own API (a trusted origin), not the webhook body, so
+// no SSRF host check applies. Null when credentials are missing.
+async function fetchBinotelAudio(event, credentials, fetchImpl) {
+  try {
+    const { apiKey, apiSecret } = credentials;
+    if (!apiKey || !apiSecret || !event.externalId) return null;
+    const link = await fetchBinotelRecording({
+      generalCallID: event.externalId,
+      apiKey,
+      apiSecret,
+      fetchImpl
+    });
+    if (!link) return null;
+    return await downloadAudio(link, { fetchImpl });
+  } catch {
+    return null;
+  }
+}
+
+// Phonet: UNVERIFIED single-shot record pull. The dossier documents the
+// constructible /rest/public path (see phonetRecordingUrl) but no single
+// record.api endpoint — this attempts one defensively and treats any non-2xx /
+// non-audio response as "no recording". Domain comes from operator-set
+// credentials, not the webhook, so no SSRF check; https is guaranteed by
+// construction.
+async function fetchPhonetRecording(event, credentials, fetchImpl) {
+  try {
+    const { accountDomain, apiKey } = credentials;
+    if (!accountDomain || !apiKey || !event.externalId) return null;
+    const domain = String(accountDomain)
+      .replace(/^https?:\/\//i, "")
+      .replace(/\/.*$/, "");
+    if (!domain) return null;
+    const url =
+      `https://${domain}/rest/calls/record.api` +
+      `?uuid=${encodeURIComponent(event.externalId)}` +
+      `&apiKey=${encodeURIComponent(apiKey)}`;
+    return await downloadAudio(url, { fetchImpl });
+  } catch {
+    return null;
+  }
+}
+
+// UniTalk: call.link arrives in CALL_END (state=ANSWER). Auth is UNVERIFIED —
+// attach the apiKey as ?apiKey= when the org configured one. Webhook-sourced →
+// SSRF-checked (the apiKey is appended on the same host).
+async function fetchUnitalkRecording(event, credentials, fetchImpl) {
+  try {
+    const url = event.recordingUrl;
+    if (!url) return null;
+    let finalUrl = url;
+    if (credentials.apiKey) {
+      const u = new URL(url); // throws on a malformed link → caught → null
+      u.searchParams.set("apiKey", credentials.apiKey);
+      finalUrl = u.toString();
+    }
+    return await downloadAudio(finalUrl, { fetchImpl, checkSsrf: true });
+  } catch {
+    return null;
+  }
+}
+
+// Stream Telecom: UNVERIFIED. recordUrl ships inside Hangup; its field name may
+// drift, so fall back to scanning the raw payload for a url. Auth is UNVERIFIED
+// too — attach the apiKey as a Bearer header when present. Webhook-sourced →
+// SSRF-checked.
+async function fetchStreamteleRecording(event, credentials, fetchImpl) {
+  try {
+    const url = event.recordingUrl || findUrlInRaw(event.raw);
+    if (!url) return null;
+    const headers = credentials.apiKey ? { authorization: `Bearer ${credentials.apiKey}` } : {};
+    return await downloadAudio(url, { fetchImpl, headers, checkSsrf: true });
+  } catch {
+    return null;
+  }
+}
+
+const RECORDING_FETCHERS = {
+  ringostat: fetchRingostatRecording,
+  binotel: fetchBinotelAudio,
+  phonet: fetchPhonetRecording,
+  unitalk: fetchUnitalkRecording,
+  streamtele: fetchStreamteleRecording
+};
+
+// The auto-pipeline's single entry point: given a normalized event and the
+// org's decrypted secrets, return the recording as { audioB64, mime } or null.
+// Every path is null-safe — a fetch failure, missing url or missing credential
+// yields null so the pipeline degrades to "no recording", never throws.
+export async function fetchRecording({ kind, event, credentials = {}, fetchImpl = fetch }) {
+  const fetcher = RECORDING_FETCHERS[resolveKind(kind)];
+  if (!fetcher) return null;
+  try {
+    return await fetcher(event || {}, credentials || {}, fetchImpl);
+  } catch {
+    return null;
+  }
+}
+
+// Tells the pipeline how a kind's recording is obtained, so it can skip the
+// fetch when the org has not supplied required credentials:
+//   needsCredentials — a REST pull that cannot start without secrets
+//   source           — "webhook" (link is in the payload) | "rest" (must pull)
+// Unknown kinds → null.
+export function recordingCapabilities(kind) {
+  switch (resolveKind(kind)) {
+    case "ringostat":
+      return { needsCredentials: false, source: "webhook" };
+    case "binotel":
+      return { needsCredentials: true, source: "rest" };
+    case "phonet":
+      return { needsCredentials: true, source: "rest" };
+    case "unitalk":
+      return { needsCredentials: false, source: "webhook" };
+    case "streamtele":
+      return { needsCredentials: false, source: "webhook" };
+    default:
+      return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Mapping a PBX employee onto a membership
 // ---------------------------------------------------------------------------
 
@@ -771,5 +1091,8 @@ export const __testing = {
   toFiniteOrNull,
   epochToMs,
   epochToIso,
-  looksLikeUrl
+  looksLikeUrl,
+  isSafePublicUrl,
+  findUrlInRaw,
+  MAX_AUDIO_BYTES
 };

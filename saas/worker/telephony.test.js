@@ -24,7 +24,11 @@ import {
   resolveManager,
   fetchBinotelRecording,
   phonetRecordingUrl,
-  PROVIDERS
+  fetchRecording,
+  recordingCapabilities,
+  PROVIDERS,
+  PROVIDER_KINDS,
+  __testing
 } from "./telephony.js";
 
 const RINGOSTAT_OUT = {
@@ -633,4 +637,371 @@ test("PROVIDERS manifest covers all five kinds with renderable fields", () => {
   assert.deepEqual(byKind.ringostat.credentialFields.map((f) => f.key), ["apiKey"]);
   assert.deepEqual(byKind.unitalk.credentialFields.map((f) => f.key), ["apiKey"]);
   assert.deepEqual(byKind.streamtele.credentialFields.map((f) => f.key), ["apiKey"]);
+});
+
+// ---------------------------------------------------------------------------
+// Recording fetch (auto-pipeline) + SSRF + manifest i18n
+// ---------------------------------------------------------------------------
+
+function bytes(str) {
+  return new Uint8Array([...str].map((c) => c.charCodeAt(0)));
+}
+
+function b64(u8) {
+  return Buffer.from(u8).toString("base64");
+}
+
+// Minimal response double: exposes .ok/.status, header .get() and .arrayBuffer,
+// matching what downloadAudio reads. Header keys are matched case-insensitively.
+function audioReply(body, { status = 200, contentType = "audio/mpeg", contentLength } = {}) {
+  const headerMap = {};
+  if (contentType !== undefined) headerMap["content-type"] = contentType;
+  if (contentLength !== undefined) headerMap["content-length"] = String(contentLength);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: (k) => (k.toLowerCase() in headerMap ? headerMap[k.toLowerCase()] : null) },
+    arrayBuffer: async () => body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength)
+  };
+}
+
+test("fetchRecording ringostat: GETs the signed webhook link, base64 + mime", async () => {
+  const audio = bytes("RINGOSTAT-AUDIO-BYTES");
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    return audioReply(audio, { contentType: "audio/wav" });
+  };
+  const event = normalizeRingostat(RINGOSTAT_OUT);
+  const result = await fetchRecording({ kind: "ringostat", event, credentials: {}, fetchImpl });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, RINGOSTAT_OUT.recording_wav);
+  assert.equal(calls[0].init.method, "GET");
+  assert.equal(result.mime, "audio/wav");
+  assert.equal(result.audioB64, b64(audio));
+});
+
+test("fetchRecording ringostat: no url → null and no network call", async () => {
+  let called = false;
+  const fetchImpl = async () => {
+    called = true;
+    return audioReply(bytes("x"));
+  };
+  const event = normalizeRingostat({ ...RINGOSTAT_OUT, has_recording: "0", recording_wav: "" });
+  assert.equal(await fetchRecording({ kind: "ringostat", event, fetchImpl }), null);
+  assert.equal(called, false);
+});
+
+test("fetchRecording ringostat: absent content-type defaults to audio/mpeg", async () => {
+  const fetchImpl = async () => audioReply(bytes("abc"), { contentType: undefined });
+  const event = normalizeRingostat(RINGOSTAT_OUT);
+  const result = await fetchRecording({ kind: "ringostat", event, fetchImpl });
+  assert.equal(result.mime, "audio/mpeg");
+});
+
+test("fetchRecording binotel: two-step pull (record link → download)", async () => {
+  const audio = bytes("BINOTEL-RECORDING");
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    if (url.includes("api.binotel.com")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ status: "success", callRecordLink: "https://rec.binotel.ua/a/x.mp3" })
+      };
+    }
+    return audioReply(audio, { contentType: "audio/mpeg" });
+  };
+  const event = normalizeBinotel(BINOTEL_COMPLETED);
+  const result = await fetchRecording({
+    kind: "binotel",
+    event,
+    credentials: { apiKey: "k", apiSecret: "s" },
+    fetchImpl
+  });
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].url, /api\.binotel\.com/);
+  assert.equal(JSON.parse(calls[0].init.body).generalCallID, "1754650000.98765");
+  assert.equal(calls[1].url, "https://rec.binotel.ua/a/x.mp3");
+  assert.equal(result.audioB64, b64(audio));
+  assert.equal(result.mime, "audio/mpeg");
+});
+
+test("fetchRecording binotel: missing credentials → null and no network call", async () => {
+  let called = false;
+  const fetchImpl = async () => {
+    called = true;
+    return audioReply(bytes("x"));
+  };
+  const event = normalizeBinotel(BINOTEL_COMPLETED);
+  assert.equal(await fetchRecording({ kind: "binotel", event, credentials: {}, fetchImpl }), null);
+  assert.equal(
+    await fetchRecording({ kind: "binotel", event, credentials: { apiKey: "k" }, fetchImpl }),
+    null,
+    "secret alone is not enough"
+  );
+  assert.equal(called, false);
+});
+
+test("fetchRecording binotel: a record-link API error degrades to null", async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ status: "error", message: "record not found" })
+  });
+  const event = normalizeBinotel(BINOTEL_COMPLETED);
+  assert.equal(
+    await fetchRecording({
+      kind: "binotel",
+      event,
+      credentials: { apiKey: "k", apiSecret: "s" },
+      fetchImpl
+    }),
+    null
+  );
+});
+
+test("fetchRecording phonet: builds the REST record-pull url from creds + uuid", async () => {
+  const audio = bytes("PHONET-RECORDING");
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    return audioReply(audio, { contentType: "audio/wav" });
+  };
+  const event = normalizePhonet(PHONET_HANGUP);
+  const result = await fetchRecording({
+    kind: "phonet",
+    event,
+    credentials: { accountDomain: "https://qwerty.phonet.com.ua/", apiKey: "pk" },
+    fetchImpl
+  });
+  assert.equal(
+    calls[0],
+    "https://qwerty.phonet.com.ua/rest/calls/record.api?uuid=47a968893984475b8c20e29dec144ce3&apiKey=pk",
+    "protocol/path stripped from the domain, uuid + key appended"
+  );
+  assert.equal(result.mime, "audio/wav");
+  assert.equal(result.audioB64, b64(audio));
+});
+
+test("fetchRecording phonet: missing domain or key → null and no network call", async () => {
+  let called = false;
+  const fetchImpl = async () => {
+    called = true;
+    return audioReply(bytes("x"));
+  };
+  const event = normalizePhonet(PHONET_HANGUP);
+  assert.equal(
+    await fetchRecording({ kind: "phonet", event, credentials: { apiKey: "pk" }, fetchImpl }),
+    null
+  );
+  assert.equal(
+    await fetchRecording({
+      kind: "phonet",
+      event,
+      credentials: { accountDomain: "x.phonet.com.ua" },
+      fetchImpl
+    }),
+    null
+  );
+  assert.equal(called, false);
+});
+
+test("fetchRecording unitalk: downloads call.link, attaching apiKey when present", async () => {
+  const audio = bytes("UNITALK-RECORDING");
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    return audioReply(audio, { contentType: "audio/mpeg" });
+  };
+  const event = normalizeUnitalk(UNITALK_END);
+
+  const withKey = await fetchRecording({
+    kind: "unitalk",
+    event,
+    credentials: { apiKey: "sekret" },
+    fetchImpl
+  });
+  assert.match(calls[0].url, /apiKey=sekret/);
+  assert.equal(withKey.audioB64, b64(audio));
+
+  const noKey = await fetchRecording({ kind: "unitalk", event, credentials: {}, fetchImpl });
+  assert.equal(calls[1].url, UNITALK_END.call.link, "no apiKey → link fetched verbatim");
+  assert.ok(noKey.audioB64);
+});
+
+test("fetchRecording streamtele: uses recordUrl and sends apiKey as a Bearer header", async () => {
+  const audio = bytes("STREAM-RECORDING");
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    return audioReply(audio, { contentType: "audio/mpeg" });
+  };
+  const event = normalizeStreamtele(STREAMTELE_HANGUP);
+  const result = await fetchRecording({
+    kind: "streamtele",
+    event,
+    credentials: { apiKey: "tok" },
+    fetchImpl
+  });
+  assert.equal(calls[0].url, STREAMTELE_HANGUP.recordUrl);
+  assert.equal(calls[0].init.headers.authorization, "Bearer tok");
+  assert.equal(result.audioB64, b64(audio));
+});
+
+test("fetchRecording streamtele: falls back to a url-looking field in raw", async () => {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(url);
+    return audioReply(bytes("y"), { contentType: "audio/mpeg" });
+  };
+  const event = {
+    recordingUrl: null,
+    raw: { event: "Hangup", weird_field: "https://gate.streamtele.com/api/rec?zzz" }
+  };
+  const result = await fetchRecording({ kind: "streamtele", event, credentials: {}, fetchImpl });
+  assert.equal(calls[0], "https://gate.streamtele.com/api/rec?zzz");
+  assert.ok(result);
+});
+
+test("fetchRecording streamtele: no url anywhere → null and no network call", async () => {
+  let called = false;
+  const fetchImpl = async () => {
+    called = true;
+    return audioReply(bytes("x"));
+  };
+  const event = { recordingUrl: null, raw: { event: "Hangup", from: "380631234567", to: "80044022203" } };
+  assert.equal(await fetchRecording({ kind: "streamtele", event, fetchImpl }), null);
+  assert.equal(called, false);
+});
+
+test("fetchRecording: an oversized recording (advertised) is skipped → null", async () => {
+  const fetchImpl = async () =>
+    audioReply(bytes("small-but-lying"), { contentType: "audio/mpeg", contentLength: 19 * 1024 * 1024 });
+  const event = normalizeRingostat(RINGOSTAT_OUT);
+  assert.equal(await fetchRecording({ kind: "ringostat", event, fetchImpl }), null);
+});
+
+test("fetchRecording: bytes over the cap are rejected even with no content-length", async () => {
+  const big = new Uint8Array(__testing.MAX_AUDIO_BYTES + 1);
+  const fetchImpl = async () => audioReply(big, { contentType: "audio/mpeg" });
+  const event = normalizeRingostat(RINGOSTAT_OUT);
+  assert.equal(await fetchRecording({ kind: "ringostat", event, fetchImpl }), null);
+});
+
+test("fetchRecording: a non-audio (html error page) response → null", async () => {
+  const fetchImpl = async () => audioReply(bytes("<html>error</html>"), { contentType: "text/html" });
+  const event = normalizeRingostat(RINGOSTAT_OUT);
+  assert.equal(await fetchRecording({ kind: "ringostat", event, fetchImpl }), null);
+});
+
+test("fetchRecording: a private-host webhook url is refused (SSRF), no network call", async () => {
+  let called = false;
+  const fetchImpl = async () => {
+    called = true;
+    return audioReply(bytes("x"), { contentType: "audio/mpeg" });
+  };
+  const event = normalizeRingostat({ ...RINGOSTAT_OUT, recording_wav: "https://127.0.0.1/secret.wav" });
+  assert.equal(await fetchRecording({ kind: "ringostat", event, fetchImpl }), null);
+  assert.equal(called, false);
+});
+
+test("fetchRecording: a non-https webhook url is refused, no network call", async () => {
+  let called = false;
+  const fetchImpl = async () => {
+    called = true;
+    return audioReply(bytes("x"), { contentType: "audio/mpeg" });
+  };
+  const event = normalizeRingostat({ ...RINGOSTAT_OUT, recording_wav: "http://app.ringostat.com/x.wav" });
+  assert.equal(await fetchRecording({ kind: "ringostat", event, fetchImpl }), null);
+  assert.equal(called, false);
+});
+
+test("fetchRecording: a throwing fetch degrades to null, never propagates", async () => {
+  const fetchImpl = async () => {
+    throw new Error("network down");
+  };
+  const event = normalizeRingostat(RINGOSTAT_OUT);
+  assert.equal(await fetchRecording({ kind: "ringostat", event, fetchImpl }), null);
+});
+
+test("fetchRecording: unknown kind → null", async () => {
+  assert.equal(
+    await fetchRecording({
+      kind: "asterisk",
+      event: {},
+      credentials: {},
+      fetchImpl: async () => audioReply(bytes("x"))
+    }),
+    null
+  );
+});
+
+test("fetchRecording resolves the legacy 'nextel' alias to the unitalk fetcher", async () => {
+  const fetchImpl = async () => audioReply(bytes("z"), { contentType: "audio/mpeg" });
+  const event = normalizeUnitalk(UNITALK_END);
+  const result = await fetchRecording({ kind: "nextel", event, credentials: {}, fetchImpl });
+  assert.ok(result && result.audioB64);
+});
+
+test("isSafePublicUrl blocks loopback/private/link-local and non-https", () => {
+  const { isSafePublicUrl } = __testing;
+  assert.equal(isSafePublicUrl("https://app.ringostat.com/x.wav"), true);
+  assert.equal(isSafePublicUrl("http://app.ringostat.com/x.wav"), false, "http rejected");
+  assert.equal(isSafePublicUrl("https://localhost/x"), false);
+  assert.equal(isSafePublicUrl("https://sub.localhost/x"), false);
+  assert.equal(isSafePublicUrl("https://127.0.0.1/x"), false);
+  assert.equal(isSafePublicUrl("https://10.0.0.5/x"), false);
+  assert.equal(isSafePublicUrl("https://192.168.1.10/x"), false);
+  assert.equal(isSafePublicUrl("https://169.254.169.254/latest/meta-data"), false, "cloud metadata");
+  assert.equal(isSafePublicUrl("https://172.16.5.5/x"), false);
+  assert.equal(isSafePublicUrl("https://172.31.255.255/x"), false);
+  assert.equal(isSafePublicUrl("https://172.32.0.1/x"), true, "172.32 is a public range");
+  assert.equal(isSafePublicUrl("https://[::1]/x"), false, "ipv6 loopback literal");
+  assert.equal(isSafePublicUrl("not a url"), false);
+});
+
+test("recordingCapabilities reports how each kind's recording is obtained", () => {
+  assert.deepEqual(recordingCapabilities("ringostat"), { needsCredentials: false, source: "webhook" });
+  assert.deepEqual(recordingCapabilities("binotel"), { needsCredentials: true, source: "rest" });
+  assert.deepEqual(recordingCapabilities("phonet"), { needsCredentials: true, source: "rest" });
+  assert.deepEqual(recordingCapabilities("unitalk"), { needsCredentials: false, source: "webhook" });
+  assert.deepEqual(recordingCapabilities("streamtele"), { needsCredentials: false, source: "webhook" });
+  assert.deepEqual(
+    recordingCapabilities("nextel"),
+    { needsCredentials: false, source: "webhook" },
+    "alias resolves to unitalk"
+  );
+  assert.equal(recordingCapabilities("asterisk"), null, "unknown kind");
+});
+
+test("PROVIDER_KINDS lists the manifest kinds in order, excluding aliases", () => {
+  assert.deepEqual(PROVIDER_KINDS, ["ringostat", "binotel", "phonet", "unitalk", "streamtele"]);
+  assert.ok(!PROVIDER_KINDS.includes("nextel"));
+});
+
+test("every manifest entry carries i18n key-paths matching its credentialFields", () => {
+  for (const provider of PROVIDERS) {
+    assert.equal(typeof provider.i18n, "object", `${provider.kind} has i18n`);
+    assert.equal(provider.i18n.titleKey, `providers.${provider.kind}.title`);
+    assert.equal(provider.i18n.mappingHintKey, `providers.${provider.kind}.mappingHint`);
+    // i18n.fields align 1:1, in order, with credentialFields (the cabinet keys
+    // the copy proxy by these).
+    assert.deepEqual(
+      provider.i18n.fields.map((f) => f.key),
+      provider.credentialFields.map((f) => f.key),
+      `${provider.kind}: i18n.fields match credentialFields`
+    );
+    for (const field of provider.i18n.fields) {
+      assert.equal(field.labelKey, `providers.${provider.kind}.fields.${field.key}.label`);
+      assert.equal(field.placeholderKey, `providers.${provider.kind}.fields.${field.key}.placeholder`);
+    }
+    // Russian literals stay as fallbacks for copyGet(...) ?? field.label.
+    assert.ok(provider.managerMappingHint.length > 0);
+    for (const field of provider.credentialFields) {
+      assert.ok(field.label.length > 0);
+      assert.equal(typeof field.placeholder, "string");
+    }
+  }
 });
