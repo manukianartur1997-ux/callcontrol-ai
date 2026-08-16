@@ -17,7 +17,13 @@
 // Webhooks have no user: the per-org webhook_token in the URL is the
 // credential (see telephony.js for why), so the only lookup is token+kind.
 
-import { analyzeCall, transcribeAudio, supportedProviders } from "./ai.js";
+import {
+  analyzeCall,
+  transcribeAudio,
+  supportedProviders,
+  supportedSttProviders,
+  defaultSttModel
+} from "./ai.js";
 import { decryptSecret, encryptSecret, keyHint } from "./crypto.js";
 import { normalizeEvent, isCompletedCallEvent, resolveManager, fetchRecording } from "./telephony.js";
 import * as telephonyModule from "./telephony.js";
@@ -80,6 +86,13 @@ const RETENTION_DEFAULT_DAYS = 90;
 const BILLING_PLANS = new Set(["payg", "trial", "custom"]);
 const BILLING_CURRENCIES = new Set(["UAH", "USD", "EUR"]);
 const UI_LANGUAGES = new Set(["uk", "ru", "en"]); // matches organizations.ui_language CHECK (0004)
+const SUPPORTED_STT = new Set(supportedSttProviders()); // {gemini, deepgram}
+
+// The provider string stored on transcripts.provider. Gemini keeps its historic
+// "gemini-audio" label (inline audio STT); Deepgram is recorded as "deepgram".
+function sttTranscriptLabel(provider) {
+  return provider === "deepgram" ? "deepgram" : "gemini-audio";
+}
 // Ledger scan for the billing summary: PostgREST has no GROUP BY without a DB
 // view (which this pilot avoids), so ledger lines are pulled and grouped into
 // months in JS. To avoid undercounting a busy month, the scan is TIME-BOUNDED
@@ -531,6 +544,79 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     return rows?.[0] || null;
   }
 
+  // STT config (migration 0007) read as a SEPARATE, defensive query — same
+  // reasoning as loadOrgBilling: naming stt_provider in loadOrg's select would
+  // break every org read on a pre-0007 database. strict=true (the /stt
+  // endpoints) re-throws a missing-column error so the caller answers 503;
+  // strict=false (the pipeline) degrades to the Gemini default so a pre-0007
+  // org still transcribes.
+  async function loadSttConfig(orgId, { strict = false } = {}) {
+    try {
+      const row = (await sbGet(env, fetchImpl, `organizations?${sbEq({ id: orgId }, {
+        select: "stt_provider,stt_deepgram_key_ciphertext,stt_deepgram_key_hint",
+        limit: "1"
+      })}`))?.[0];
+      if (!row) return null;
+      return {
+        provider: SUPPORTED_STT.has(row.stt_provider) ? row.stt_provider : "gemini",
+        deepgramCipher: row.stt_deepgram_key_ciphertext || null,
+        deepgramHint: row.stt_deepgram_key_hint || null
+      };
+    } catch (error) {
+      if (isMissingColumnError(error) || isMissingTableError(error)) {
+        if (strict) throw error;
+        return { provider: "gemini", deepgramCipher: null, deepgramHint: null };
+      }
+      throw error;
+    }
+  }
+
+  // Load + decrypt an org's key for one analysis provider (org_ai_keys), or null.
+  async function loadDecryptedKey(orgId, provider) {
+    const row = (await sbGet(env, fetchImpl, `org_ai_keys?${sbEq(
+      { org_id: orgId, provider },
+      { select: "key_ciphertext", limit: "1" }
+    )}`))?.[0];
+    return row ? decryptSecret(row.key_ciphertext, env.ORG_SECRET_KEY) : null;
+  }
+
+  // Resolve which STT provider+key this org uses and transcribe, with a Gemini
+  // FALLBACK when a chosen Deepgram run throws. Returns { stt, provider } on
+  // success, { noKey: true } when no usable STT key exists (the caller decides
+  // how to surface that), and THROWS when transcription itself fails (caller
+  // refunds the slot). analysisKeyPlain is the already-decrypted analysis key,
+  // reused when the analysis provider IS gemini so no second decrypt is needed.
+  async function transcribeForOrg({ org, orgId, analysisKeyPlain, audioB64, mime }) {
+    const cfg = await loadSttConfig(orgId);
+    const geminiKey =
+      org.ai_provider === "gemini" ? analysisKeyPlain : await loadDecryptedKey(orgId, "gemini");
+    const deepgramKey =
+      cfg.provider === "deepgram" && cfg.deepgramCipher
+        ? await decryptSecret(cfg.deepgramCipher, env.ORG_SECRET_KEY)
+        : null;
+    const geminiModel = org.ai_provider === "gemini" ? org.ai_model || undefined : undefined;
+
+    let primary = null;
+    let fallback = null;
+    if (cfg.provider === "deepgram" && deepgramKey) {
+      primary = { provider: "deepgram", apiKey: deepgramKey, model: defaultSttModel("deepgram") || undefined };
+      if (geminiKey) fallback = { provider: "gemini", apiKey: geminiKey, model: geminiModel };
+    } else if (geminiKey) {
+      // Gemini chosen, OR Deepgram chosen but no key configured — degrade to Gemini.
+      primary = { provider: "gemini", apiKey: geminiKey, model: geminiModel };
+    }
+    if (!primary) return { noKey: true };
+
+    try {
+      const stt = await transcribeAudio({ ...primary, audioB64, mime, fetchImpl });
+      return { stt, provider: primary.provider };
+    } catch (error) {
+      if (!fallback) throw error;
+      const stt = await transcribeAudio({ ...fallback, audioB64, mime, fetchImpl });
+      return { stt, provider: fallback.provider };
+    }
+  }
+
   // Billing fields (migration 0005) read as a SEPARATE, defensive query. A
   // PostgREST select that names a not-yet-migrated column fails the WHOLE query
   // (PGRST204/42703), so these must never ride inside loadOrg's select — a
@@ -941,21 +1027,15 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
       return;
     }
 
-    // (d) STT runs on Gemini regardless of the org's analysis provider; when
-    // they differ BOTH keys are needed. A missing key is a setup gap, not a
-    // spend — refund the slot and stay PENDING so a reingest works later.
+    // (d) STT runs on the org's chosen provider (Gemini by default, Deepgram if
+    // configured), with a Gemini fallback; the analysis stage uses the org's
+    // analysis-provider key. A missing key is a setup gap, not a spend — refund
+    // the slot and stay PENDING so a reingest works later.
     const analysisKeyRow = (await sbGet(env, fetchImpl, `org_ai_keys?${sbEq(
       { org_id: orgId, provider: org.ai_provider },
       { select: "id,key_ciphertext", limit: "1" }
     )}`))?.[0];
-    let sttKeyRow = analysisKeyRow;
-    if (analysisKeyRow && org.ai_provider !== "gemini") {
-      sttKeyRow = (await sbGet(env, fetchImpl, `org_ai_keys?${sbEq(
-        { org_id: orgId, provider: "gemini" },
-        { select: "id,key_ciphertext", limit: "1" }
-      )}`))?.[0];
-    }
-    if (!analysisKeyRow || !sttKeyRow) {
+    if (!analysisKeyRow) {
       await shiftUsage(env, fetchImpl, orgId, period, { calls: -1 }).catch(() => {});
       await sbPatch(env, fetchImpl, `calls?${sbEq({ id: callId, org_id: orgId })}`, {
         body: { status: "pending", error: "ai_key_missing" }
@@ -965,20 +1045,26 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
 
     // Plaintext keys exist only inside this call frame.
     const apiKey = await decryptSecret(analysisKeyRow.key_ciphertext, env.ORG_SECRET_KEY);
-    const sttKey = sttKeyRow === analysisKeyRow
-      ? apiKey
-      : await decryptSecret(sttKeyRow.key_ciphertext, env.ORG_SECRET_KEY);
 
     let stt;
+    let sttProvider;
     try {
-      stt = await transcribeAudio({
-        provider: "gemini",
-        apiKey: sttKey,
-        model: org.ai_provider === "gemini" ? org.ai_model || undefined : undefined,
+      const result = await transcribeForOrg({
+        org,
+        orgId,
+        analysisKeyPlain: apiKey,
         audioB64: recording.audioB64,
-        mime: recording.mime,
-        fetchImpl
+        mime: recording.mime
       });
+      if (result.noKey) {
+        await shiftUsage(env, fetchImpl, orgId, period, { calls: -1 }).catch(() => {});
+        await sbPatch(env, fetchImpl, `calls?${sbEq({ id: callId, org_id: orgId })}`, {
+          body: { status: "pending", error: "ai_key_missing" }
+        });
+        return;
+      }
+      stt = result.stt;
+      sttProvider = result.provider;
     } catch (error) {
       const message = String(error?.message || error);
       // Nothing was transcribed — refund the slot and mark the call failed.
@@ -999,7 +1085,7 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     // plain /analyze retry can reuse without paying for STT again.
     await sbPost(env, fetchImpl, `transcripts?${new URLSearchParams({ on_conflict: "call_id" })}`, {
       headers: { prefer: "resolution=merge-duplicates" },
-      body: { org_id: orgId, call_id: callId, text: stt.text, lang: stt.lang, provider: "gemini-audio" }
+      body: { org_id: orgId, call_id: callId, text: stt.text, lang: stt.lang, provider: sttTranscriptLabel(sttProvider) }
     });
     await sbPatch(env, fetchImpl, `calls?${sbEq({ id: callId, org_id: orgId })}`, {
       body: { status: "transcribed", error: null }
@@ -1176,28 +1262,17 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     )}`))?.[0];
     if (!checklist) return json({ error: "no_checklist" }, 409);
 
-    // STT runs on Gemini only; the analysis stage uses whatever provider the
-    // org chose. When they differ BOTH keys must exist before money moves.
+    // STT runs on the org's chosen provider (Gemini default, Deepgram if
+    // configured) with a Gemini fallback; the analysis stage uses whatever
+    // provider the org chose. The analysis key must exist before money moves.
     const analysisKeyRow = (await sbGet(env, fetchImpl, `org_ai_keys?${sbEq(
       { org_id: orgId, provider: org.ai_provider },
       { select: "id,key_ciphertext", limit: "1" }
     )}`))?.[0];
     if (!analysisKeyRow) return json({ error: "ai_key_missing" }, 409);
 
-    let sttKeyRow = analysisKeyRow;
-    if (org.ai_provider !== "gemini") {
-      sttKeyRow = (await sbGet(env, fetchImpl, `org_ai_keys?${sbEq(
-        { org_id: orgId, provider: "gemini" },
-        { select: "id,key_ciphertext", limit: "1" }
-      )}`))?.[0];
-      if (!sttKeyRow) return json({ error: "ai_key_missing", detail: "stt_requires_gemini_key" }, 409);
-    }
-
     // Plaintext keys exist only inside this call frame.
     const apiKey = await decryptSecret(analysisKeyRow.key_ciphertext, env.ORG_SECRET_KEY);
-    const sttKey = sttKeyRow === analysisKeyRow
-      ? apiKey
-      : await decryptSecret(sttKeyRow.key_ciphertext, env.ORG_SECRET_KEY);
 
     // ONE reserved slot covers STT + analysis of this call.
     const period = `${new Date().toISOString().slice(0, 7)}-01`;
@@ -1206,17 +1281,15 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     }
 
     let stt;
+    let sttProvider;
     try {
-      stt = await transcribeAudio({
-        provider: "gemini",
-        apiKey: sttKey,
-        // The org's chosen model is a Gemini one only when the org runs on
-        // Gemini; otherwise the STT default applies.
-        model: org.ai_provider === "gemini" ? org.ai_model || undefined : undefined,
-        audioB64,
-        mime,
-        fetchImpl
-      });
+      const result = await transcribeForOrg({ org, orgId, analysisKeyPlain: apiKey, audioB64, mime });
+      if (result.noKey) {
+        await shiftUsage(env, fetchImpl, orgId, period, { calls: -1 }).catch(() => {});
+        return json({ error: "ai_key_missing", detail: "stt_key_missing" }, 409);
+      }
+      stt = result.stt;
+      sttProvider = result.provider;
     } catch (error) {
       const message = String(error?.message || error);
       await Promise.allSettled([
@@ -1263,7 +1336,7 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
       // its transcript instead of tripping the unique index.
       await sbPost(env, fetchImpl, `transcripts?${new URLSearchParams({ on_conflict: "call_id" })}`, {
         headers: { prefer: "resolution=merge-duplicates" },
-        body: { org_id: orgId, call_id: call.id, text: stt.text, lang: stt.lang, provider: "gemini-audio" }
+        body: { org_id: orgId, call_id: call.id, text: stt.text, lang: stt.lang, provider: sttTranscriptLabel(sttProvider) }
       });
       if (callId) {
         await sbPatch(env, fetchImpl, `calls?${sbEq({ id: call.id, org_id: orgId })}`, {
@@ -1357,6 +1430,83 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     });
 
     return json({ ok: true, hint });
+  }
+
+  // GET STT config — owner/admin. Returns the provider choice and whether a
+  // Deepgram key is configured (never the key). 503 migration_required pre-0007.
+  async function getStt(orgId, membership) {
+    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+
+    let cfg;
+    try {
+      cfg = await loadSttConfig(orgId, { strict: true });
+    } catch (error) {
+      if (isMissingColumnError(error) || isMissingTableError(error)) {
+        return json({ error: "migration_required" }, 503);
+      }
+      throw error;
+    }
+    if (!cfg) return json({ error: "org_not_found" }, 404);
+
+    return json({
+      provider: cfg.provider,
+      providers: supportedSttProviders(),
+      deepgram_configured: !!cfg.deepgramCipher,
+      deepgram_hint: cfg.deepgramHint || null
+    });
+  }
+
+  // PUT STT config — owner only (STT spends the client's money, like the AI
+  // key). Sets the provider and, when a Deepgram key is supplied, stores it
+  // encrypted. Selecting Deepgram requires a key (supplied now or already
+  // stored) so the picker can never point at a provider that would 401 at
+  // pipeline time.
+  async function putStt(request, orgId, user, membership) {
+    if (membership.role !== "owner") return json({ error: "forbidden" }, 403);
+
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== "object") return json({ error: "bad_request" }, 400);
+
+    const provider = String(body.provider || "");
+    if (!supportedSttProviders().includes(provider)) return json({ error: "unsupported_provider" }, 400);
+
+    const key = typeof body.key === "string" ? body.key.trim() : "";
+    const patch = { stt_provider: provider };
+    let hint = null;
+    if (key) {
+      hint = keyHint(key);
+      patch.stt_deepgram_key_ciphertext = await encryptSecret(key, env.ORG_SECRET_KEY);
+      patch.stt_deepgram_key_hint = hint;
+    }
+
+    // Deepgram needs a key. If none is supplied now, one must already be stored.
+    if (provider === "deepgram" && !key) {
+      let existing;
+      try {
+        existing = await loadSttConfig(orgId, { strict: true });
+      } catch (error) {
+        if (isMissingColumnError(error) || isMissingTableError(error)) {
+          return json({ error: "migration_required" }, 503);
+        }
+        throw error;
+      }
+      if (!existing?.deepgramCipher) return json({ error: "deepgram_key_required" }, 400);
+    }
+
+    try {
+      await sbPatch(env, fetchImpl, `organizations?${sbEq({ id: orgId })}`, { body: patch });
+    } catch (error) {
+      if (isMissingColumnError(error) || isMissingTableError(error)) {
+        return json({ error: "migration_required" }, 503);
+      }
+      throw error;
+    }
+    // meta carries the provider and the 4-char hint ONLY — never key material.
+    await sbPost(env, fetchImpl, "audit_log", {
+      body: { org_id: orgId, actor_id: user.id, action: "org.stt_set", target: provider, meta: { provider, hint } }
+    }).catch(() => {});
+
+    return json({ ok: true, provider });
   }
 
   async function listMembers(orgId) {
@@ -2622,6 +2772,8 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     if (rest === "recordings" && method === "POST") return uploadRecording(request, orgId, user, membership);
     if (rest === "ai-key" && method === "GET") return getAiKey(orgId, membership);
     if (rest === "ai-key" && method === "PUT") return putAiKey(request, orgId, user, membership);
+    if (rest === "stt" && method === "GET") return getStt(orgId, membership);
+    if (rest === "stt" && method === "PUT") return putStt(request, orgId, user, membership);
     if (rest === "members" && method === "GET") return listMembers(orgId);
     if (rest === "members" && method === "POST") return addMember(request, orgId, user, membership);
     if (rest === "integrations" && method === "GET") return listIntegrations(orgId, membership);

@@ -803,6 +803,182 @@ test("ai-key PUT: an unsupported provider is rejected before encryption", async 
 });
 
 // ---------------------------------------------------------------------------
+// STT provider config (migration 0007)
+// ---------------------------------------------------------------------------
+
+// Answers the organizations read with STT columns when the select asks for
+// stt_provider, and the plain org row otherwise. deepgramCipher pre-encrypted
+// (the mock responder must be synchronous).
+function seedSttOrg(mock, { provider = "gemini", deepgramCipher = null, deepgramHint = null, missing = false } = {}) {
+  mock.on("GET", "/rest/v1/organizations", (record) => {
+    if (record.url.includes("stt_provider")) {
+      if (missing) {
+        return { status: 400, body: { code: "42703", message: "column organizations.stt_provider does not exist" } };
+      }
+      return { body: [{ stt_provider: provider, stt_deepgram_key_ciphertext: deepgramCipher, stt_deepgram_key_hint: deepgramHint }] };
+    }
+    return { body: [{ id: ORG_ID, name: "Pilot Co", monthly_call_quota: 500, timezone: "Europe/Kyiv", ai_provider: "gemini", ai_model: null }] };
+  });
+}
+
+test("stt GET: returns the provider and whether Deepgram is configured (never the key)", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  seedSttOrg(mock, { provider: "deepgram", deepgramCipher: "cipher-xyz", deepgramHint: "…dktk" });
+
+  const res = await makeApi(mock).handle(get(`/api/app/orgs/${ORG_ID}/stt`, GOOD_TOKEN));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.provider, "deepgram");
+  assert.equal(body.deepgram_configured, true);
+  assert.equal(body.deepgram_hint, "…dktk");
+  assert.deepEqual(body.providers, ["gemini", "deepgram"]);
+  assert.equal("stt_deepgram_key_ciphertext" in body, false, "the ciphertext never reaches the browser");
+});
+
+test("stt GET: 503 migration_required before 0007, 403 for a viewer", async () => {
+  const pre = createFetchMock();
+  seedAuth(pre);
+  seedMembership(pre, "owner");
+  seedSttOrg(pre, { missing: true });
+  const res = await makeApi(pre).handle(get(`/api/app/orgs/${ORG_ID}/stt`, GOOD_TOKEN));
+  assert.equal(res.status, 503);
+  assert.deepEqual(await res.json(), { error: "migration_required" });
+
+  const viewer = createFetchMock();
+  seedAuth(viewer);
+  seedMembership(viewer, "viewer");
+  const res2 = await makeApi(viewer).handle(get(`/api/app/orgs/${ORG_ID}/stt`, GOOD_TOKEN));
+  assert.equal(res2.status, 403);
+});
+
+test("stt PUT: switching to gemini patches the provider (owner only)", async () => {
+  const denied = createFetchMock();
+  seedAuth(denied);
+  seedMembership(denied, "admin");
+  const forbidden = await makeApi(denied).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/stt`, { provider: "gemini" }, GOOD_TOKEN)
+  );
+  assert.equal(forbidden.status, 403, "STT spends money — owner only, like the AI key");
+
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("PATCH", "/rest/v1/organizations", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+  const ok = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/stt`, { provider: "gemini" }, GOOD_TOKEN)
+  );
+  assert.equal(ok.status, 200);
+  const patch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/organizations"));
+  assert.deepEqual(patch.body, { stt_provider: "gemini" });
+});
+
+test("stt PUT: selecting Deepgram stores the key ENCRYPTED and records only a hint", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("PATCH", "/rest/v1/organizations", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+  const DEEPGRAM_KEY = "dg-secret-key-0001";
+
+  const res = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/stt`, { provider: "deepgram", key: DEEPGRAM_KEY }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  const patch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/organizations"));
+  assert.equal(patch.body.stt_provider, "deepgram");
+  assert.ok(patch.body.stt_deepgram_key_ciphertext, "a ciphertext is stored");
+  assert.notEqual(patch.body.stt_deepgram_key_ciphertext, DEEPGRAM_KEY, "the raw key is never stored");
+  assert.ok(patch.body.stt_deepgram_key_hint, "a hint is stored");
+  // the raw key must not appear anywhere in the outbound requests
+  for (const r of mock.requests) {
+    assert.equal(JSON.stringify(r.body || "").includes(DEEPGRAM_KEY), false, `key leaked to ${r.url}`);
+  }
+});
+
+test("stt PUT: Deepgram without a key (and none stored) is refused", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  seedSttOrg(mock, { provider: "gemini", deepgramCipher: null }); // nothing stored
+  const res = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/stt`, { provider: "deepgram" }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).error, "deepgram_key_required");
+  assert.equal(mock.requests.some((r) => r.method === "PATCH"), false, "no provider switch without a usable key");
+});
+
+test("stt PUT: an unsupported provider is rejected", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  const res = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/stt`, { provider: "whisper" }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).error, "unsupported_provider");
+});
+
+test("stt pipeline: a Deepgram-configured org transcribes on Deepgram", async () => {
+  const mock = createFetchMock();
+  const cipher = await encryptSecret("dg-key-live", MASTER_KEY);
+  // org read must answer BOTH the loadOrg select and the stt_provider select.
+  mock.on("GET", "/rest/v1/organizations", (record) =>
+    record.url.includes("stt_provider")
+      ? { body: [{ stt_provider: "deepgram", stt_deepgram_key_ciphertext: cipher, stt_deepgram_key_hint: "…live" }] }
+      : { body: [{ id: ORG_ID, name: "Pilot Co", monthly_call_quota: 500, timezone: "Europe/Kyiv", ai_provider: "gemini", ai_model: null }] }
+  );
+  await seedRecordings(mock);
+  mock.on("POST", "api.deepgram.com", {
+    status: 200,
+    body: {
+      metadata: { duration: 42 },
+      results: {
+        channels: [{ detected_language: "ru", alternatives: [{ words: [] }] }],
+        utterances: [
+          { speaker: 0, transcript: "Здравствуйте, чем могу помочь?" },
+          { speaker: 1, transcript: "Хочу узнать цену." }
+        ]
+      }
+    }
+  });
+  mock.on("POST", "/rest/v1/usage_ledger", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody(), GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  assert.ok(mock.requests.some((r) => r.url.includes("api.deepgram.com")), "Deepgram was actually called");
+  const transcript = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/transcripts"));
+  assert.equal(transcript.body.provider, "deepgram", "the transcript records the real STT provider");
+});
+
+test("stt pipeline: a failing Deepgram falls back to Gemini", async () => {
+  const mock = createFetchMock();
+  const cipher = await encryptSecret("dg-key-live", MASTER_KEY);
+  mock.on("GET", "/rest/v1/organizations", (record) =>
+    record.url.includes("stt_provider")
+      ? { body: [{ stt_provider: "deepgram", stt_deepgram_key_ciphertext: cipher, stt_deepgram_key_hint: "…live" }] }
+      : { body: [{ id: ORG_ID, name: "Pilot Co", monthly_call_quota: 500, timezone: "Europe/Kyiv", ai_provider: "gemini", ai_model: null }] }
+  );
+  await seedRecordings(mock);
+  mock.on("POST", "api.deepgram.com", { status: 500, body: { err: "deepgram down" } });
+  mock.on("POST", "/rest/v1/usage_ledger", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody(), GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200, "the Gemini fallback carries the call to success");
+  assert.ok(mock.requests.some((r) => r.url.includes("api.deepgram.com")), "Deepgram was tried first");
+  assert.ok(mock.requests.some((r) => r.url.includes("generativelanguage")), "then Gemini ran as fallback");
+  const transcript = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/transcripts"));
+  assert.equal(transcript.body.provider, "gemini-audio", "the fallback provider is recorded");
+});
+
+// ---------------------------------------------------------------------------
 // Members
 // ---------------------------------------------------------------------------
 

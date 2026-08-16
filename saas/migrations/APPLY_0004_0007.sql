@@ -1,7 +1,7 @@
 -- ===========================================================================
 -- CallControl — APPLY THIS in the Supabase SQL editor (one paste, Run once).
 --
--- This is migrations 0004 (growth) + 0005 (billing/retention) + 0006 (role-cap) concatenated,
+-- This is migrations 0004 (growth) + 0005 (billing/retention) + 0006 (role-cap) + 0007 (STT provider) concatenated,
 -- for the LIVE project where 0001-0003 are ALREADY applied. Do NOT paste
 -- ALL_IN_ONE.sql on the live project — it re-creates the 0001-0003 policies and
 -- would error on "policy already exists". This file is safe to run and is
@@ -119,3 +119,13 @@ create policy invite_write on invites for all to authenticated
     app.is_org_wide(org_id)
     and (role <> 'owner' or app.is_owner(org_id))
   );
+
+-- ---------------------------------------------------------------------------
+-- 0007 · Per-org STT provider choice + encrypted Deepgram key.
+--    Default 'gemini' so nothing changes until an owner opts into Deepgram.
+-- ---------------------------------------------------------------------------
+alter table organizations
+  add column if not exists stt_provider text not null default 'gemini'
+    check (stt_provider in ('gemini', 'deepgram')),
+  add column if not exists stt_deepgram_key_ciphertext text,
+  add column if not exists stt_deepgram_key_hint text;
