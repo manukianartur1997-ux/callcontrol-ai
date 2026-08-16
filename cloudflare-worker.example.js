@@ -21,9 +21,11 @@ import { createApi, dailyDigest } from "./saas/worker/api.js";
 let saasApi = null;
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     saasApi = saasApi || createApi({ env });
-    const saasResponse = await saasApi.handle(request);
+    // ctx carries waitUntil: the telephony webhook uses it to run its ingest
+    // pipeline after the ack without blocking the response.
+    const saasResponse = await saasApi.handle(request, ctx);
     if (saasResponse) return saasResponse;
 
     const url = new URL(request.url);

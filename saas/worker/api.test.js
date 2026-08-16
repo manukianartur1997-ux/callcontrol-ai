@@ -138,9 +138,13 @@ function createFetchMock() {
 
     const status = reply.status ?? 200;
     const payload = reply.body;
+    // Optional response headers (e.g. Content-Range for count=exact reads).
+    // Existing routes omit them; a real Headers object keeps .get() working.
+    const headers = new Headers(reply.headers || {});
     return {
       ok: status >= 200 && status < 300,
       status,
+      headers,
       json: async () => payload,
       text: async () => (payload === undefined ? "" : JSON.stringify(payload))
     };
@@ -2186,4 +2190,461 @@ test("dailyDigest: an org with zero analyzed calls still gets an honest digest",
   await dailyDigest(ENV_TG, mock);
   const tg = mock.requests.find((r) => r.url.includes("api.telegram.org"));
   assert.match(tg.body.text, /не было/);
+});
+
+// ---------------------------------------------------------------------------
+// Webhook-token rotation
+// ---------------------------------------------------------------------------
+
+test("rotate-token: owner mints a fresh token, keeps enabled, returns the path", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("GET", "/rest/v1/integrations", { body: [{ id: INTEGRATION_ID, enabled: true }] });
+  mock.on("PATCH", "/rest/v1/integrations", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/integrations/ringostat/rotate-token`, {}, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.match(body.webhook_token, /^[a-f0-9]{48}$/); // 24 bytes hex
+  assert.equal(body.webhook_path, `/api/telephony/ringostat/${body.webhook_token}`);
+
+  // PATCH writes only the token — the enabled flag is untouched.
+  const patch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/integrations"));
+  assert.deepEqual(patch.body, { webhook_token: body.webhook_token });
+  assert.equal("enabled" in patch.body, false);
+
+  const audit = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/audit_log"));
+  assert.equal(audit.body.action, "integration.token_rotated");
+  assert.deepEqual(audit.body.meta, { kind: "ringostat" });
+});
+
+test("rotate-token: a manager and a viewer are refused (owner|admin only)", async () => {
+  for (const role of ["manager", "viewer"]) {
+    const mock = createFetchMock();
+    seedAuth(mock);
+    seedMembership(mock, role);
+    const res = await makeApi(mock).handle(
+      send("POST", `/api/app/orgs/${ORG_ID}/integrations/ringostat/rotate-token`, {}, GOOD_TOKEN)
+    );
+    assert.equal(res.status, 403);
+    assert.equal(mock.requests.some((r) => r.method === "PATCH"), false);
+  }
+});
+
+test("rotate-token: an unknown kind is 404 before any write", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/integrations/nope/rotate-token`, {}, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 404);
+  assert.deepEqual(await res.json(), { error: "unknown_kind" });
+  // The membership IDOR guard reads memberships, but no integrations row is
+  // ever touched for an unknown kind.
+  assert.equal(mock.requests.some((r) => r.url.includes("/rest/v1/integrations")), false);
+});
+
+test("rotate-token: an absent integration row is created enabled", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "admin");
+  mock.on("GET", "/rest/v1/integrations", { body: [] });
+  mock.on("POST", "/rest/v1/integrations", { status: 201 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/integrations/phonet/rotate-token`, {}, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  const created = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/integrations"));
+  assert.equal(created.body.enabled, true);
+  assert.equal(created.body.kind, "phonet");
+  assert.match(created.body.webhook_token, /^[a-f0-9]{48}$/);
+});
+
+// ---------------------------------------------------------------------------
+// Checklist editor
+// ---------------------------------------------------------------------------
+
+const GOOD_CHECKLIST_ITEMS = [
+  { key: "greeting", label: "Приветствие", weight: 40, hint: "Назвал компанию" },
+  { key: "needs", label: "Потребность", weight: 60, hint: "" }
+];
+
+test("checklists GET: any member reads the list with item_count and weight_total", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "viewer");
+  mock.on("GET", "/rest/v1/checklists", {
+    body: [
+      { id: CHECKLIST_ID, name: "Базовый", is_default: true, items: GOOD_CHECKLIST_ITEMS, created_at: "2026-01-01T00:00:00Z" }
+    ]
+  });
+  const res = await makeApi(mock).handle(get(`/api/app/orgs/${ORG_ID}/checklists`, GOOD_TOKEN));
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), [
+    { id: CHECKLIST_ID, name: "Базовый", is_default: true, item_count: 2, weight_total: 100 }
+  ]);
+});
+
+test("checklists GET :id: returns the full items array", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "manager");
+  mock.on("GET", "/rest/v1/checklists", {
+    body: [{ id: CHECKLIST_ID, name: "Базовый", is_default: false, items: GOOD_CHECKLIST_ITEMS }]
+  });
+  const res = await makeApi(mock).handle(get(`/api/app/orgs/${ORG_ID}/checklists/${CHECKLIST_ID}`, GOOD_TOKEN));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.items.length, 2);
+  assert.deepEqual(body.items[0], { key: "greeting", label: "Приветствие", weight: 40, hint: "Назвал компанию" });
+});
+
+test("checklists POST: owner creates a non-default checklist and gets its id", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("POST", "/rest/v1/checklists", (r) => ({ status: 201, body: [{ id: CHECKLIST_ID, ...r.body }] }));
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/checklists`, { name: "Продажи", items: GOOD_CHECKLIST_ITEMS }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 201);
+  assert.deepEqual(await res.json(), { id: CHECKLIST_ID });
+  const insert = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/checklists"));
+  assert.equal(insert.body.is_default, false);
+  assert.equal(insert.body.name, "Продажи");
+});
+
+test("checklists POST: weights that do not sum to 100 are rejected with the offending sum", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/checklists`, {
+      name: "Кривой",
+      items: [
+        { key: "alpha", label: "A", weight: 30, hint: "" },
+        { key: "beta", label: "B", weight: 30, hint: "" }
+      ]
+    }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: "weights_must_sum_100", got: 60 });
+  assert.equal(mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/checklists")), false);
+});
+
+test("checklists POST: a manager and a viewer cannot write (owner|admin only)", async () => {
+  for (const role of ["manager", "viewer"]) {
+    const mock = createFetchMock();
+    seedAuth(mock);
+    seedMembership(mock, role);
+    const res = await makeApi(mock).handle(
+      send("POST", `/api/app/orgs/${ORG_ID}/checklists`, { name: "X", items: GOOD_CHECKLIST_ITEMS }, GOOD_TOKEN)
+    );
+    assert.equal(res.status, 403);
+  }
+});
+
+test("checklists POST: bad keys, labels, weights and item counts are rejected", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  const api = makeApi(mock);
+  const cases = [
+    [{ name: "n", items: [] }, "bad_items"],
+    [{ name: "n", items: [{ key: "1bad", label: "L", weight: 100, hint: "" }] }, "bad_item_key"],
+    [{ name: "n", items: [{ key: "aa", label: "L", weight: 50, hint: "" }, { key: "aa", label: "L2", weight: 50, hint: "" }] }, "duplicate_item_key"],
+    [{ name: "n", items: [{ key: "aa", label: "", weight: 100, hint: "" }] }, "bad_item_label"],
+    [{ name: "n", items: [{ key: "aa", label: "L", weight: 50.5, hint: "" }] }, "bad_item_weight"],
+    [{ name: "n", items: [{ key: "aa", label: "L", weight: 100, hint: "x".repeat(301) }] }, "bad_item_hint"],
+    [{ name: "", items: GOOD_CHECKLIST_ITEMS }, "bad_name"]
+  ];
+  for (const [payload, expected] of cases) {
+    const res = await api.handle(send("POST", `/api/app/orgs/${ORG_ID}/checklists`, payload, GOOD_TOKEN));
+    assert.equal(res.status, 400);
+    assert.equal((await res.json()).error, expected);
+  }
+});
+
+test("checklists PUT: updates name and items, never touches is_default", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "admin");
+  mock.on("GET", "/rest/v1/checklists", { body: [{ id: CHECKLIST_ID }] });
+  mock.on("PATCH", "/rest/v1/checklists", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/checklists/${CHECKLIST_ID}`, {
+      name: "Обновлён",
+      items: GOOD_CHECKLIST_ITEMS,
+      is_default: true // must be ignored
+    }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  const patch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/checklists"));
+  assert.equal(patch.body.name, "Обновлён");
+  assert.equal("is_default" in patch.body, false);
+});
+
+test("checklists PUT: the weights-sum-100 rule still applies", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("GET", "/rest/v1/checklists", { body: [{ id: CHECKLIST_ID }] });
+  const res = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/checklists/${CHECKLIST_ID}`, {
+      items: [{ key: "alpha", label: "A", weight: 10, hint: "" }]
+    }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: "weights_must_sum_100", got: 10 });
+});
+
+test("checklists make-default clears the others FIRST, then sets this one", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("GET", "/rest/v1/checklists", { body: [{ id: CHECKLIST_ID }] });
+  mock.on("PATCH", "/rest/v1/checklists", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/checklists/${CHECKLIST_ID}/make-default`, {}, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  const patches = mock.requests.filter((r) => r.method === "PATCH" && r.url.includes("/rest/v1/checklists"));
+  assert.equal(patches.length, 2);
+  // First clears every current default, second promotes this checklist.
+  assert.match(decodeURIComponent(patches[0].url), /is_default=eq\.true/);
+  assert.equal(patches[0].body.is_default, false);
+  assert.match(decodeURIComponent(patches[1].url), new RegExp(`id=eq\\.${CHECKLIST_ID}`));
+  assert.equal(patches[1].body.is_default, true);
+});
+
+test("checklists make-default: a viewer is refused", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "viewer");
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/checklists/${CHECKLIST_ID}/make-default`, {}, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 403);
+});
+
+test("checklists DELETE: the default cannot be deleted", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("GET", "/rest/v1/checklists", { body: [{ id: CHECKLIST_ID, is_default: true }] });
+  const res = await makeApi(mock).handle(
+    send("DELETE", `/api/app/orgs/${ORG_ID}/checklists/${CHECKLIST_ID}`, undefined, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 409);
+  assert.deepEqual(await res.json(), { error: "cannot_delete_default" });
+  assert.equal(mock.requests.some((r) => r.method === "DELETE"), false);
+});
+
+test("checklists DELETE: a non-default checklist is deleted", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("GET", "/rest/v1/checklists", { body: [{ id: CHECKLIST_ID, is_default: false }] });
+  mock.on("DELETE", "/rest/v1/checklists", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+  const res = await makeApi(mock).handle(
+    send("DELETE", `/api/app/orgs/${ORG_ID}/checklists/${CHECKLIST_ID}`, undefined, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  assert.equal(mock.requests.some((r) => r.method === "DELETE" && r.url.includes("/rest/v1/checklists")), true);
+});
+
+// ---------------------------------------------------------------------------
+// Usage
+// ---------------------------------------------------------------------------
+
+const CURRENT_PERIOD = `${new Date().toISOString().slice(0, 7)}-01`;
+
+test("usage GET: owner sees quota, current month and a cost estimate per month", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("GET", "/rest/v1/organizations", {
+    body: [{ id: ORG_ID, name: "Pilot Co", monthly_call_quota: 500, timezone: "Europe/Kyiv", ai_provider: "gemini", ai_model: null }]
+  });
+  mock.on("GET", "/rest/v1/usage_counters", {
+    body: [
+      { period: CURRENT_PERIOD, calls_analyzed: 12, tokens_in: 1_000_000, tokens_out: 500_000 },
+      { period: "2026-01-01", calls_analyzed: 4, tokens_in: 0, tokens_out: 0 }
+    ]
+  });
+  const res = await makeApi(mock).handle(get(`/api/app/orgs/${ORG_ID}/usage`, GOOD_TOKEN));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.quota, 500);
+  assert.equal(body.period, CURRENT_PERIOD);
+  assert.deepEqual(body.current, { calls_analyzed: 12, tokens_in: 1_000_000, tokens_out: 500_000 });
+  assert.equal(body.history.length, 2);
+  // 1M in * $0.10 + 0.5M out * $0.40 = 0.10 + 0.20 = 0.30
+  assert.equal(body.history[0].cost_estimate, 0.3);
+});
+
+test("usage GET: a manager and a viewer are refused", async () => {
+  for (const role of ["manager", "viewer"]) {
+    const mock = createFetchMock();
+    seedAuth(mock);
+    seedMembership(mock, role);
+    const res = await makeApi(mock).handle(get(`/api/app/orgs/${ORG_ID}/usage`, GOOD_TOKEN));
+    assert.equal(res.status, 403);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Platform super-admin
+// ---------------------------------------------------------------------------
+
+const ENV_PLATFORM = { ...ENV, PLATFORM_ADMIN_IDS: `${USER_ID}, some-other-id` };
+
+test("platform: a non-listed user is 403 on every platform route", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  const env = { ...ENV, PLATFORM_ADMIN_IDS: "someone-else-entirely" };
+  const res = await makeApi(mock, env).handle(get("/api/app/platform/stats", GOOD_TOKEN));
+  assert.equal(res.status, 403);
+  assert.equal(mock.requests.some((r) => r.url.includes("/rest/v1/")), false);
+});
+
+test("platform: an empty PLATFORM_ADMIN_IDS grants nobody (fail closed)", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  const res = await makeApi(mock, ENV).handle(get("/api/app/platform/stats", GOOD_TOKEN));
+  assert.equal(res.status, 403);
+});
+
+test("platform stats: exact totals plus bounded distinct/sum aggregates", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  mock.on("GET", "/rest/v1/organizations", { status: 206, headers: { "content-range": "0-0/5" }, body: [] });
+  mock.on("GET", "/rest/v1/analyses", { status: 206, headers: { "content-range": "0-0/30" }, body: [] });
+  // calls serves BOTH the exact count (header) and the 7-day distinct scan (body).
+  mock.on("GET", "/rest/v1/calls", {
+    status: 206,
+    headers: { "content-range": "0-0/40" },
+    body: [{ org_id: ORG_ID }, { org_id: NEW_ORG_ID }]
+  });
+  mock.on("GET", "/rest/v1/memberships", (r) =>
+    r.url.includes("select=user_id")
+      ? { body: [{ user_id: USER_ID }, { user_id: USER_ID }, { user_id: NEW_USER_ID }] }
+      : { body: [] }
+  );
+  mock.on("GET", "/rest/v1/usage_counters", {
+    body: [{ tokens_in: 1000, tokens_out: 500 }, { tokens_in: 200, tokens_out: 100 }]
+  });
+
+  const res = await makeApi(mock, ENV_PLATFORM).handle(get("/api/app/platform/stats", GOOD_TOKEN));
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), {
+    orgs: 5, users: 2, calls: 40, analyzed: 30, tokens: 1800, active_7d: 2
+  });
+});
+
+test("platform orgs: a bounded list with per-org member/call/analyzed counts", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  mock.on("GET", "/rest/v1/organizations", {
+    body: [
+      { id: ORG_ID, name: "Pilot Co", slug: "pilot-co", plan: "pilot", created_at: "2026-02-01T00:00:00Z" },
+      { id: NEW_ORG_ID, name: "Second", slug: "second", plan: "pilot", created_at: "2026-03-01T00:00:00Z" }
+    ]
+  });
+  mock.on("GET", "/rest/v1/memberships", {
+    body: [{ org_id: ORG_ID }, { org_id: ORG_ID }, { org_id: NEW_ORG_ID }]
+  });
+  mock.on("GET", "/rest/v1/calls", {
+    body: [
+      { org_id: ORG_ID, created_at: "2026-08-01T10:00:00Z" },
+      { org_id: ORG_ID, created_at: "2026-08-05T10:00:00Z" }
+    ]
+  });
+  mock.on("GET", "/rest/v1/analyses", { body: [{ org_id: ORG_ID }] });
+
+  const res = await makeApi(mock, ENV_PLATFORM).handle(get("/api/app/platform/orgs", GOOD_TOKEN));
+  assert.equal(res.status, 200);
+  const rows = await res.json();
+  const first = rows.find((r) => r.id === ORG_ID);
+  assert.equal(first.members, 2);
+  assert.equal(first.calls, 2);
+  assert.equal(first.analyzed, 1);
+  assert.equal(first.last_activity, "2026-08-05T10:00:00Z");
+  const second = rows.find((r) => r.id === NEW_ORG_ID);
+  assert.equal(second.members, 1);
+  assert.equal(second.calls, 0);
+  assert.equal(second.last_activity, null);
+});
+
+test("platform org detail: members, usage and integrations WITHOUT any secret", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  mock.on("GET", "/rest/v1/organizations", {
+    body: [{ id: ORG_ID, name: "Pilot Co", slug: "pilot-co", plan: "pilot", monthly_call_quota: 500, timezone: "Europe/Kyiv", ai_provider: "gemini", ai_model: null, created_at: "2026-02-01T00:00:00Z" }]
+  });
+  mock.on("GET", "/rest/v1/memberships", {
+    body: [{ role: "owner", full_name: "Артур", extension: "101" }]
+  });
+  mock.on("GET", "/rest/v1/usage_counters", {
+    body: [{ period: CURRENT_PERIOD, calls_analyzed: 3, tokens_in: 10, tokens_out: 5 }]
+  });
+  // The mock row carries a webhook_token to prove it is stripped from the reply.
+  mock.on("GET", "/rest/v1/integrations", {
+    body: [{ kind: "ringostat", enabled: true, last_event_at: "2026-08-10T00:00:00Z", webhook_token: "SECRET_SHOULD_NOT_LEAK" }]
+  });
+  mock.on("GET", "/rest/v1/calls", {
+    body: [{ id: CALL_ID, direction: "outbound", manager_label: "Иван", started_at: "2026-08-10T00:00:00Z", duration_sec: 60, status: "analyzed", created_at: "2026-08-10T00:00:00Z" }]
+  });
+
+  const res = await makeApi(mock, ENV_PLATFORM).handle(get(`/api/app/platform/orgs/${ORG_ID}`, GOOD_TOKEN));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.org.id, ORG_ID);
+  assert.deepEqual(body.integrations, [{ kind: "ringostat", enabled: true, last_event_at: "2026-08-10T00:00:00Z" }]);
+  assert.equal(body.members[0].full_name, "Артур");
+  assert.equal(body.recent_calls.length, 1);
+  // No secret material anywhere in the serialized response.
+  assert.equal(JSON.stringify(body).includes("SECRET_SHOULD_NOT_LEAK"), false);
+  // Never selects the transcript for the recent-calls list.
+  const callsReq = mock.requests.find((r) => r.url.includes("/rest/v1/calls"));
+  assert.equal(/transcript/i.test(decodeURIComponent(callsReq.url)), false);
+});
+
+test("platform org detail: a non-UUID org id is 400", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  const res = await makeApi(mock, ENV_PLATFORM).handle(get("/api/app/platform/orgs/not-a-uuid", GOOD_TOKEN));
+  assert.equal(res.status, 400);
+});
+
+// ---------------------------------------------------------------------------
+// /me exposes the platform-admin flag
+// ---------------------------------------------------------------------------
+
+test("/me: is_platform_admin reflects the env allow list", async () => {
+  const mkMock = () => {
+    const mock = createFetchMock();
+    seedAuth(mock);
+    mock.on("GET", "/rest/v1/memberships", { body: [] });
+    return mock;
+  };
+  const listed = await makeApi(mkMock(), ENV_PLATFORM).handle(get("/api/app/me", GOOD_TOKEN));
+  assert.equal((await listed.json()).is_platform_admin, true);
+
+  const plain = await makeApi(mkMock(), ENV).handle(get("/api/app/me", GOOD_TOKEN));
+  assert.equal((await plain.json()).is_platform_admin, false);
 });

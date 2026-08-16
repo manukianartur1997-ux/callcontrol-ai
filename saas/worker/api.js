@@ -19,7 +19,7 @@
 
 import { analyzeCall, transcribeAudio, supportedProviders } from "./ai.js";
 import { decryptSecret, encryptSecret, keyHint } from "./crypto.js";
-import { normalizeEvent, isCompletedCallEvent, resolveManager } from "./telephony.js";
+import { normalizeEvent, isCompletedCallEvent, resolveManager, fetchRecording } from "./telephony.js";
 import * as telephonyModule from "./telephony.js";
 import { getUser, createTokenCache } from "./auth.js";
 import { sbGet, sbPost, sbPatch, sbEq } from "./supabase-rest.js";
@@ -44,6 +44,77 @@ const RECORDING_DIRECTIONS = new Set(["inbound", "outbound"]);
 const TELEGRAM_CHAT_ID_RE = /^-?\d{5,20}$/;
 const TELEGRAM_RECIPIENT_KINDS = new Set(["per_call", "daily"]);
 const MAX_TELEGRAM_RECIPIENTS = 10;
+
+// Checklist editor. Item keys are short machine identifiers the analyzer maps
+// to; labels/hints are human copy. Weights MUST sum to exactly 100 so a score
+// is a straight percentage — that invariant is the whole point of a checklist.
+const CHECKLIST_KEY_RE = /^[a-z][a-z0-9_]{1,40}$/;
+const MAX_CHECKLIST_ITEMS = 20;
+const MAX_CHECKLIST_LABEL = 120;
+const MAX_CHECKLIST_HINT = 300;
+const MAX_CHECKLIST_NAME = 120;
+
+// Editable cost estimate. Google's gemini-flash rate card, USD per 1M tokens;
+// update these two constants when the published pricing changes. The usage
+// endpoint multiplies the counters by this to show an at-a-glance monthly bill.
+const GEMINI_FLASH_INPUT_USD_PER_1M = 0.10;
+const GEMINI_FLASH_OUTPUT_USD_PER_1M = 0.40;
+
+// Platform super-admin dashboards read BOUNDED slices, never the whole DB: the
+// org list is capped and the aggregate scans stop at this many rows, so a
+// runaway table cannot turn one admin request into an unbounded read. Past the
+// cap the derived numbers (distinct users, token sums, 7-day activity) simply
+// undercount — an accepted trade for a pilot-scale internal view.
+const PLATFORM_ORG_LIST_CAP = 500;
+const PLATFORM_SCAN_CAP = 5000;
+
+// Cost of one org-month at the gemini-flash estimate above (USD, 4 decimals).
+function estimateCostUsd(tokensIn, tokensOut) {
+  const usd =
+    ((Number(tokensIn) || 0) / 1_000_000) * GEMINI_FLASH_INPUT_USD_PER_1M +
+    ((Number(tokensOut) || 0) / 1_000_000) * GEMINI_FLASH_OUTPUT_USD_PER_1M;
+  return Math.round(usd * 10_000) / 10_000;
+}
+
+// Checklist name: a trimmed 1..120-char string, or null when unusable.
+function cleanChecklistName(name) {
+  if (typeof name !== "string") return null;
+  const trimmed = name.trim();
+  if (trimmed.length < 1 || trimmed.length > MAX_CHECKLIST_NAME) return null;
+  return trimmed;
+}
+
+// Validate + normalize a checklist items array. Returns { items } on success
+// or { error, got? } on the first violation. The weights-sum-100 rule reports
+// the offending sum so the cabinet can show it inline.
+function validateChecklistItems(items) {
+  if (!Array.isArray(items) || items.length < 1 || items.length > MAX_CHECKLIST_ITEMS) {
+    return { error: "bad_items" };
+  }
+  const seen = new Set();
+  const clean = [];
+  let sum = 0;
+  for (const item of items) {
+    if (!item || typeof item !== "object") return { error: "bad_items" };
+    const key = String(item.key ?? "");
+    if (!CHECKLIST_KEY_RE.test(key)) return { error: "bad_item_key" };
+    if (seen.has(key)) return { error: "duplicate_item_key" };
+    seen.add(key);
+    const label = typeof item.label === "string" ? item.label.trim() : "";
+    if (label.length < 1 || label.length > MAX_CHECKLIST_LABEL) return { error: "bad_item_label" };
+    const weight = item.weight;
+    if (typeof weight !== "number" || !Number.isInteger(weight) || weight < 0 || weight > 100) {
+      return { error: "bad_item_weight" };
+    }
+    const hint = item.hint == null ? "" : String(item.hint);
+    if (hint.length > MAX_CHECKLIST_HINT) return { error: "bad_item_hint" };
+    sum += weight;
+    clean.push({ key, label, weight, hint });
+  }
+  // Exactly 100 — not "close to". A score is a percentage of the max.
+  if (sum !== 100) return { error: "weights_must_sum_100", got: sum };
+  return { items: clean };
+}
 
 // Credential kinds come from the PROVIDERS manifest in telephony.js — an
 // array of { kind, credentialFields, … } entries in the multi-PBX revision.
@@ -355,8 +426,59 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
   // module-global — see auth.js.
   const tokenCache = createTokenCache();
 
+  // The most recent request's ExecutionContext, stashed by handle(). The
+  // telephony webhook fires the (slow) ingest pipeline AFTER acking the PBX, so
+  // it must outlive the response: ctx.waitUntil keeps the isolate alive until
+  // the background promise settles without blocking the ack.
+  let latestCtx = null;
+
+  // Run `promise` after the response is sent.
+  //   Production (ctx present): hand it to ctx.waitUntil and return undefined —
+  //     the caller `await`s undefined (instant) and the ack goes out at once
+  //     while the job runs in the background.
+  //   Tests / any host without a ctx: return the promise so the caller can
+  //     `await` it, which makes the pipeline run SYNCHRONOUSLY. That is what
+  //     lets the test suite observe every downstream request deterministically.
+  function scheduleBackground(promise) {
+    if (latestCtx && typeof latestCtx.waitUntil === "function") {
+      latestCtx.waitUntil(promise);
+      return undefined;
+    }
+    return promise;
+  }
+
   const isConfigured = () =>
     Boolean(env?.SUPABASE_URL && env?.SUPABASE_SECRET_KEY && env?.ORG_SECRET_KEY);
+
+  // Platform super-admin: the caller's Supabase user id is in the env allow
+  // list. FAIL CLOSED — an absent or empty PLATFORM_ADMIN_IDS grants nobody,
+  // so a misconfiguration locks the super-admin surface rather than opening it.
+  function isPlatformAdmin(user) {
+    if (!user?.id) return false;
+    const ids = String(env.PLATFORM_ADMIN_IDS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return ids.includes(user.id);
+  }
+
+  // Exact row count via PostgREST's Content-Range header, without pulling the
+  // rows themselves: Prefer: count=exact + a 0-0 range answers "0-0/<total>"
+  // (or "*/0" when empty). Falls back to 0 if the header is absent.
+  async function sbCount(table, extraQuery = "") {
+    const query = extraQuery ? `${table}?${extraQuery}` : `${table}?select=id`;
+    const response = await fetchImpl(`${env.SUPABASE_URL}/rest/v1/${query}`, {
+      headers: {
+        apikey: env.SUPABASE_SECRET_KEY,
+        authorization: `Bearer ${env.SUPABASE_SECRET_KEY}`,
+        prefer: "count=exact",
+        range: "0-0"
+      }
+    });
+    const range = response?.headers?.get?.("content-range") || "";
+    const total = Number(String(range).split("/")[1]);
+    return Number.isFinite(total) ? total : 0;
+  }
 
   // --- shared reads --------------------------------------------------------
 
@@ -415,7 +537,7 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
         // columns not migrated yet — the cabinet falls back to its defaults
       }
     }
-    return json({ user, memberships });
+    return json({ user, memberships, is_platform_admin: isPlatformAdmin(user) });
   }
 
   async function analyze(request, orgId, user, membership) {
@@ -625,6 +747,232 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     await Promise.allSettled(
       recipients.map((row) => sendTelegramMessage(env, fetchImpl, row.chat_id, text))
     );
+  }
+
+  // --- self-serve auto-pipeline (telephony webhook + reingest) -------------
+
+  // The org's decrypted PBX credentials for one kind, as a plain {} object, or
+  // {} when none are stored / the blob is unreadable. Never throws — a missing
+  // secret just means "pull-based providers can't fetch audio", which the
+  // recording step degrades to "no recording".
+  async function loadIntegrationCredentials(orgId, kind) {
+    const integration = (await sbGet(env, fetchImpl, `integrations?${sbEq(
+      { org_id: orgId, kind },
+      { select: "id", limit: "1" }
+    )}`))?.[0];
+    if (!integration) return {};
+    let secret;
+    try {
+      secret = (await sbGet(env, fetchImpl, `integration_secrets?${sbEq(
+        { integration_id: integration.id },
+        { select: "secret_ciphertext", limit: "1" }
+      )}`))?.[0];
+    } catch (_) {
+      return {}; // table unreadable — treat as no credentials
+    }
+    if (!secret) return {};
+    try {
+      return JSON.parse(await decryptSecret(secret.secret_ciphertext, env.ORG_SECRET_KEY)) || {};
+    } catch (_) {
+      return {}; // undecryptable/legacy blob
+    }
+  }
+
+  // The product promise: a client connects a PBX in ~15 minutes and thereafter
+  // just receives analyses. This runs AFTER the webhook ack (or on demand from
+  // /reingest) and drives one call from `pending` to `analyzed` end to end.
+  //
+  // The whole job is wrapped so a throw can NEVER surface to the PBX (the ack
+  // already went out) — it is recorded on the call as a short reason instead.
+  async function runIngestPipeline({ orgId, callId, kind, event = null }) {
+    try {
+      await ingestCall({ orgId, callId, kind, event });
+    } catch (error) {
+      await sbPatch(env, fetchImpl, `calls?${sbEq({ id: callId, org_id: orgId })}`, {
+        body: { error: String(error?.message || error).slice(0, 300) }
+      }).catch(() => {});
+    }
+  }
+
+  async function ingestCall({ orgId, callId, kind, event }) {
+    const org = await loadOrg(orgId);
+    if (!org) return;
+    const call = (await sbGet(env, fetchImpl, `calls?${sbEq(
+      { id: callId, org_id: orgId },
+      { select: "id,manager_label,direction,duration_sec,external_id,recording_url,status", limit: "1" }
+    )}`))?.[0];
+    if (!call) return;
+
+    // (a) credentials for pull-based providers (binotel/phonet); webhook-link
+    // providers (ringostat/unitalk/streamtele) ignore an empty object.
+    const credentials = await loadIntegrationCredentials(orgId, kind);
+
+    // (b) recording. On the webhook path `event` carries the signed/temporary
+    // link; on /reingest it is rebuilt from the stored call row. null = no
+    // audio reachable: stay PENDING, spend NO quota, so a later reingest (once
+    // the customer pastes the missing PBX key) can still pick the call up.
+    const recEvent = event || {
+      recordingUrl: call.recording_url || null,
+      externalId: call.external_id || "",
+      raw: {}
+    };
+    const recording = await fetchRecording({ kind, event: recEvent, credentials, fetchImpl });
+    if (!recording) {
+      await sbPatch(env, fetchImpl, `calls?${sbEq({ id: callId, org_id: orgId })}`, {
+        body: { status: "pending", error: "no_recording" }
+      });
+      return;
+    }
+
+    // (c) reserve the quota slot only now — every step above was free, so a
+    // call with no reachable audio never costs the customer a slot.
+    const period = `${new Date().toISOString().slice(0, 7)}-01`;
+    if (!(await reserveQuotaSlot(env, fetchImpl, orgId, period, org.monthly_call_quota))) {
+      await sbPatch(env, fetchImpl, `calls?${sbEq({ id: callId, org_id: orgId })}`, {
+        body: { error: "quota_exceeded" }
+      });
+      return;
+    }
+
+    // (d) STT runs on Gemini regardless of the org's analysis provider; when
+    // they differ BOTH keys are needed. A missing key is a setup gap, not a
+    // spend — refund the slot and stay PENDING so a reingest works later.
+    const analysisKeyRow = (await sbGet(env, fetchImpl, `org_ai_keys?${sbEq(
+      { org_id: orgId, provider: org.ai_provider },
+      { select: "id,key_ciphertext", limit: "1" }
+    )}`))?.[0];
+    let sttKeyRow = analysisKeyRow;
+    if (analysisKeyRow && org.ai_provider !== "gemini") {
+      sttKeyRow = (await sbGet(env, fetchImpl, `org_ai_keys?${sbEq(
+        { org_id: orgId, provider: "gemini" },
+        { select: "id,key_ciphertext", limit: "1" }
+      )}`))?.[0];
+    }
+    if (!analysisKeyRow || !sttKeyRow) {
+      await shiftUsage(env, fetchImpl, orgId, period, { calls: -1 }).catch(() => {});
+      await sbPatch(env, fetchImpl, `calls?${sbEq({ id: callId, org_id: orgId })}`, {
+        body: { status: "pending", error: "ai_key_missing" }
+      });
+      return;
+    }
+
+    // Plaintext keys exist only inside this call frame.
+    const apiKey = await decryptSecret(analysisKeyRow.key_ciphertext, env.ORG_SECRET_KEY);
+    const sttKey = sttKeyRow === analysisKeyRow
+      ? apiKey
+      : await decryptSecret(sttKeyRow.key_ciphertext, env.ORG_SECRET_KEY);
+
+    let stt;
+    try {
+      stt = await transcribeAudio({
+        provider: "gemini",
+        apiKey: sttKey,
+        model: org.ai_provider === "gemini" ? org.ai_model || undefined : undefined,
+        audioB64: recording.audioB64,
+        mime: recording.mime,
+        fetchImpl
+      });
+    } catch (error) {
+      const message = String(error?.message || error);
+      // Nothing was transcribed — refund the slot and mark the call failed.
+      await Promise.allSettled([
+        shiftUsage(env, fetchImpl, orgId, period, { calls: -1 }),
+        sbPatch(env, fetchImpl, `calls?${sbEq({ id: callId, org_id: orgId })}`, {
+          body: { status: "failed", error: message.slice(0, 300) }
+        }),
+        sbPost(env, fetchImpl, "audit_log", {
+          body: { org_id: orgId, action: "call.transcribe_failed", target: callId, meta: { kind, error: message.slice(0, 200) } }
+        })
+      ]);
+      return;
+    }
+
+    // Persist the transcript (upsert on call_id) and mark `transcribed` BEFORE
+    // scoring, so an analysis failure below leaves a paid-for transcript that a
+    // plain /analyze retry can reuse without paying for STT again.
+    await sbPost(env, fetchImpl, `transcripts?${new URLSearchParams({ on_conflict: "call_id" })}`, {
+      headers: { prefer: "resolution=merge-duplicates" },
+      body: { org_id: orgId, call_id: callId, text: stt.text, lang: stt.lang, provider: "gemini-audio" }
+    });
+    await sbPatch(env, fetchImpl, `calls?${sbEq({ id: callId, org_id: orgId })}`, {
+      body: { status: "transcribed", error: null }
+    });
+
+    const checklist = (await sbGet(env, fetchImpl, `checklists?${sbEq(
+      { org_id: orgId, is_default: "true" },
+      { select: "id,items", limit: "1" }
+    )}`))?.[0];
+    if (!checklist) {
+      // Transcribed and paid for, but nothing to score against. Keep the
+      // transcript, count the STT tokens, stop; a reingest once a default
+      // checklist exists will score it.
+      await shiftUsage(env, fetchImpl, orgId, period, {
+        tokensIn: stt.tokensIn || 0,
+        tokensOut: stt.tokensOut || 0
+      }).catch(() => {});
+      return;
+    }
+
+    // (e) + (f): the SHARED analysis tail — persist the analysis, count STT +
+    // analysis tokens against the one reserved slot, PATCH `analyzed`, and fire
+    // the per-call Telegram ping. On analysis failure it leaves the call
+    // `transcribed` (retryable) exactly like /recordings. actorId is null: a
+    // webhook/cron ingest has no user.
+    await runAnalysisStage({
+      orgId,
+      actorId: null,
+      org,
+      call: {
+        id: callId,
+        manager_label: call.manager_label ?? null,
+        direction: call.direction || "unknown",
+        duration_sec: call.duration_sec ?? null
+      },
+      transcriptText: stt.text,
+      checklist,
+      apiKey,
+      period,
+      stt: { tokensIn: stt.tokensIn || 0, tokensOut: stt.tokensOut || 0 }
+    });
+  }
+
+  // POST /calls/:callId/reingest — re-run the auto-pipeline for a stuck
+  // telephony call. The self-serve escape hatch for a customer who pasted their
+  // PBX/AI keys AFTER the first events arrived (those calls sit `pending` with
+  // error "no_recording"). Ownership-gated exactly like recordings.
+  async function reingestCall(orgId, user, membership, callId) {
+    if (membership.role === "viewer") return json({ error: "forbidden" }, 403);
+    if (!UUID_RE.test(callId)) return json({ error: "call_not_found" }, 404);
+
+    // org_id in the filter, and the manager/lead scoping below, make a foreign
+    // or out-of-scope call indistinguishable from a missing one — no oracle.
+    const call = (await sbGet(env, fetchImpl, `calls?${sbEq(
+      { id: callId, org_id: orgId },
+      { select: "id,source,status,manager_id,department_id", limit: "1" }
+    )}`))?.[0];
+    if (!call) return json({ error: "call_not_found" }, 404);
+    if (membership.role === "manager" && call.manager_id !== user.id) {
+      return json({ error: "call_not_found" }, 404);
+    }
+    if (
+      membership.role === "lead" &&
+      (call.department_id ?? null) !== (membership.department_id ?? null)
+    ) {
+      return json({ error: "call_not_found" }, 404);
+    }
+
+    // Only a telephony call has a PBX recording to pull, and only a stuck one is
+    // worth re-running (an analyzed call is done).
+    if (!TELEPHONY_KINDS.has(call.source)) return json({ error: "not_reingestable" }, 409);
+    if (!["pending", "failed"].includes(call.status)) return json({ error: "not_reingestable" }, 409);
+
+    await sbPost(env, fetchImpl, "audit_log", {
+      body: { org_id: orgId, actor_id: user.id, action: "call.reingest", target: callId, meta: { source: call.source } }
+    });
+    // Same fire-after-response discipline as the webhook: background in
+    // production, synchronous under test (no ctx).
+    await scheduleBackground(runIngestPipeline({ orgId, callId, kind: call.source, event: null }));
+    return json({ ok: true, status: "queued" });
   }
 
   // POST /recordings: audio in -> STT (Gemini) -> the same analysis pipeline
@@ -1460,6 +1808,406 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     return json({ ok: true, org_id: orgId });
   }
 
+  // --- webhook-token rotation ----------------------------------------------
+
+  // Kill-switch for a leaked webhook URL: mint a fresh token, keeping the
+  // integration otherwise as-is. The old URL stops resolving the instant the
+  // PATCH lands (the token is the whole credential — see telephony.js).
+  async function rotateIntegrationToken(orgId, user, membership, kind) {
+    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+    if (!credentialKinds().has(kind)) return json({ error: "unknown_kind" }, 404);
+
+    const token = randomHex(24);
+    const existing = (await sbGet(env, fetchImpl, `integrations?${sbEq(
+      { org_id: orgId, kind },
+      { select: "id,enabled", limit: "1" }
+    )}`))?.[0];
+
+    if (existing) {
+      // Rotate the token only — `enabled` (the separate kill switch) is left
+      // exactly as the owner set it.
+      await sbPatch(env, fetchImpl, `integrations?${sbEq({ id: existing.id, org_id: orgId })}`, {
+        body: { webhook_token: token }
+      });
+    } else {
+      // No row yet (e.g. a kind seeded only after migration 0004): create it
+      // enabled. On a pre-0004 database the kind CHECK still admits only the
+      // legacy pair, so a new-provider create degrades to migration_required
+      // instead of a 500.
+      try {
+        await sbPost(env, fetchImpl, "integrations", {
+          body: { org_id: orgId, kind, enabled: true, webhook_token: token }
+        });
+      } catch (error) {
+        if (/kind_check|_400|check constraint/i.test(String(error?.message))) {
+          return json({ error: "migration_required" }, 503);
+        }
+        throw error;
+      }
+    }
+
+    await sbPost(env, fetchImpl, "audit_log", {
+      body: {
+        org_id: orgId,
+        actor_id: user.id,
+        action: "integration.token_rotated",
+        target: kind,
+        meta: { kind }
+      }
+    });
+    return json({ webhook_token: token, webhook_path: `/api/telephony/${kind}/${token}` });
+  }
+
+  // --- checklist editor ----------------------------------------------------
+
+  // Reads are open to any member; writes are owner|admin. analyze/recordings
+  // still load is_default=true, so a badly-weighted DRAFT checklist can never
+  // affect scoring until it is explicitly made default.
+
+  async function listChecklists(orgId) {
+    const rows = (await sbGet(env, fetchImpl, `checklists?${sbEq(
+      { org_id: orgId },
+      { select: "id,name,is_default,items,created_at", order: "created_at.asc" }
+    )}`)) || [];
+    return json(rows.map((row) => {
+      const items = Array.isArray(row.items) ? row.items : [];
+      return {
+        id: row.id,
+        name: row.name,
+        is_default: row.is_default,
+        item_count: items.length,
+        weight_total: items.reduce((sum, it) => sum + (Number(it?.weight) || 0), 0)
+      };
+    }));
+  }
+
+  async function getChecklist(orgId, id) {
+    if (!UUID_RE.test(id)) return json({ error: "not_found" }, 404);
+    // org_id in the filter: a foreign checklist is indistinguishable from a
+    // missing one.
+    const row = (await sbGet(env, fetchImpl, `checklists?${sbEq(
+      { id, org_id: orgId },
+      { select: "id,name,is_default,items", limit: "1" }
+    )}`))?.[0];
+    if (!row) return json({ error: "not_found" }, 404);
+    const items = Array.isArray(row.items) ? row.items : [];
+    return json({
+      id: row.id,
+      name: row.name,
+      is_default: row.is_default,
+      items: items.map((it) => ({
+        key: it?.key,
+        label: it?.label,
+        weight: it?.weight,
+        hint: it?.hint ?? ""
+      }))
+    });
+  }
+
+  async function createChecklist(request, orgId, user, membership) {
+    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+
+    const body = await request.json().catch(() => null);
+    const name = cleanChecklistName(body?.name);
+    if (!name) return json({ error: "bad_name" }, 400);
+    const validated = validateChecklistItems(body?.items);
+    if (validated.error) {
+      return json(
+        validated.got !== undefined
+          ? { error: validated.error, got: validated.got }
+          : { error: validated.error },
+        400
+      );
+    }
+
+    // Always is_default:false — a new checklist is a draft until make-default
+    // promotes it, which keeps the partial-unique default index safe.
+    const inserted = await sbPost(env, fetchImpl, "checklists", {
+      headers: { prefer: "return=representation" },
+      body: { org_id: orgId, name, items: validated.items, is_default: false }
+    });
+    const id = inserted?.[0]?.id || null;
+    await sbPost(env, fetchImpl, "audit_log", {
+      body: {
+        org_id: orgId,
+        actor_id: user.id,
+        action: "checklist.created",
+        target: id,
+        meta: { name, item_count: validated.items.length }
+      }
+    });
+    return json({ id }, 201);
+  }
+
+  async function updateChecklist(request, orgId, user, membership, id) {
+    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+    if (!UUID_RE.test(id)) return json({ error: "not_found" }, 404);
+
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== "object") return json({ error: "bad_request" }, 400);
+
+    const existing = (await sbGet(env, fetchImpl, `checklists?${sbEq(
+      { id, org_id: orgId },
+      { select: "id", limit: "1" }
+    )}`))?.[0];
+    if (!existing) return json({ error: "not_found" }, 404);
+
+    // is_default is NEVER writable here — default is switched only through the
+    // dedicated make-default route, which clears the others in one place.
+    const patch = {};
+    if ("name" in body) {
+      const name = cleanChecklistName(body.name);
+      if (!name) return json({ error: "bad_name" }, 400);
+      patch.name = name;
+    }
+    if ("items" in body) {
+      const validated = validateChecklistItems(body.items);
+      if (validated.error) {
+        return json(
+          validated.got !== undefined
+            ? { error: validated.error, got: validated.got }
+            : { error: validated.error },
+          400
+        );
+      }
+      patch.items = validated.items;
+    }
+    if (!Object.keys(patch).length) return json({ error: "nothing_to_update" }, 400);
+
+    await sbPatch(env, fetchImpl, `checklists?${sbEq({ id, org_id: orgId })}`, { body: patch });
+    await sbPost(env, fetchImpl, "audit_log", {
+      body: {
+        org_id: orgId,
+        actor_id: user.id,
+        action: "checklist.updated",
+        target: id,
+        meta: { fields: Object.keys(patch) }
+      }
+    });
+    return json({ ok: true });
+  }
+
+  async function makeDefaultChecklist(orgId, user, membership, id) {
+    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+    if (!UUID_RE.test(id)) return json({ error: "not_found" }, 404);
+
+    const existing = (await sbGet(env, fetchImpl, `checklists?${sbEq(
+      { id, org_id: orgId },
+      { select: "id", limit: "1" }
+    )}`))?.[0];
+    if (!existing) return json({ error: "not_found" }, 404);
+
+    // Clear-others-FIRST, then set: the partial-unique index
+    // checklists_one_default_per_org allows only one is_default row per org, so
+    // setting before clearing would trip the constraint.
+    await sbPatch(env, fetchImpl, `checklists?${sbEq({ org_id: orgId, is_default: "true" })}`, {
+      body: { is_default: false }
+    });
+    await sbPatch(env, fetchImpl, `checklists?${sbEq({ id, org_id: orgId })}`, {
+      body: { is_default: true }
+    });
+    await sbPost(env, fetchImpl, "audit_log", {
+      body: {
+        org_id: orgId,
+        actor_id: user.id,
+        action: "checklist.made_default",
+        target: id,
+        meta: {}
+      }
+    });
+    return json({ ok: true });
+  }
+
+  async function deleteChecklist(orgId, user, membership, id) {
+    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+    if (!UUID_RE.test(id)) return json({ error: "not_found" }, 404);
+
+    const existing = (await sbGet(env, fetchImpl, `checklists?${sbEq(
+      { id, org_id: orgId },
+      { select: "id,is_default", limit: "1" }
+    )}`))?.[0];
+    if (!existing) return json({ error: "not_found" }, 404);
+    // The default is what analyze/recordings load — deleting it would break
+    // scoring, so refuse until another checklist is promoted first.
+    if (existing.is_default) return json({ error: "cannot_delete_default" }, 409);
+
+    await sbRequestDelete(env, fetchImpl, `checklists?${sbEq({ id, org_id: orgId })}`);
+    await sbPost(env, fetchImpl, "audit_log", {
+      body: {
+        org_id: orgId,
+        actor_id: user.id,
+        action: "checklist.deleted",
+        target: id,
+        meta: {}
+      }
+    });
+    return json({ ok: true });
+  }
+
+  // --- usage ---------------------------------------------------------------
+
+  async function usage(orgId, membership) {
+    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+
+    const org = await loadOrg(orgId);
+    if (!org) return json({ error: "org_not_found" }, 404);
+
+    const period = `${new Date().toISOString().slice(0, 7)}-01`;
+    // Last 6 months, newest first — one small row per org-month.
+    const rows = (await sbGet(env, fetchImpl, `usage_counters?${sbEq(
+      { org_id: orgId },
+      { select: "period,calls_analyzed,tokens_in,tokens_out", order: "period.desc", limit: "6" }
+    )}`)) || [];
+
+    const history = rows.map((row) => {
+      const tokensIn = row.tokens_in || 0;
+      const tokensOut = row.tokens_out || 0;
+      return {
+        period: row.period,
+        calls_analyzed: row.calls_analyzed || 0,
+        tokens_in: tokensIn,
+        tokens_out: tokensOut,
+        cost_estimate: estimateCostUsd(tokensIn, tokensOut)
+      };
+    });
+
+    const currentRow = history.find((h) => h.period === period);
+    const current = currentRow
+      ? {
+          calls_analyzed: currentRow.calls_analyzed,
+          tokens_in: currentRow.tokens_in,
+          tokens_out: currentRow.tokens_out
+        }
+      : { calls_analyzed: 0, tokens_in: 0, tokens_out: 0 };
+
+    return json({
+      quota: org.monthly_call_quota,
+      period,
+      current,
+      history
+    });
+  }
+
+  // --- platform super-admin ------------------------------------------------
+
+  // Aggregate platform stats. Big totals are exact O(1) header counts; the
+  // derived numbers (distinct users, token sums, 7-day activity) are computed
+  // from BOUNDED scans and undercount past PLATFORM_SCAN_CAP (see the cap note).
+  async function platformStats() {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+    const [orgs, calls, analyzed] = await Promise.all([
+      sbCount("organizations"),
+      sbCount("calls"),
+      sbCount("analyses")
+    ]);
+
+    const memberRows = (await sbGet(env, fetchImpl, `memberships?${new URLSearchParams({
+      select: "user_id",
+      limit: String(PLATFORM_SCAN_CAP)
+    })}`)) || [];
+    const users = new Set(memberRows.map((r) => r.user_id).filter(Boolean)).size;
+
+    // usage_counters is one small row per org-month — safe to pull and sum.
+    const counters = (await sbGet(env, fetchImpl, `usage_counters?${new URLSearchParams({
+      select: "tokens_in,tokens_out",
+      limit: String(PLATFORM_SCAN_CAP)
+    })}`)) || [];
+    const tokens = counters.reduce((sum, r) => sum + (r.tokens_in || 0) + (r.tokens_out || 0), 0);
+
+    const recentParams = new URLSearchParams({ select: "org_id", limit: String(PLATFORM_SCAN_CAP) });
+    recentParams.set("created_at", `gte.${sevenDaysAgo}`);
+    const recent = (await sbGet(env, fetchImpl, `calls?${recentParams}`)) || [];
+    const active_7d = new Set(recent.map((r) => r.org_id).filter(Boolean)).size;
+
+    return json({ orgs, users, calls, analyzed, tokens, active_7d });
+  }
+
+  async function platformOrgs() {
+    // Capped at PLATFORM_ORG_LIST_CAP rows — the list is a bounded window, not
+    // a full export.
+    const orgs = (await sbGet(env, fetchImpl, `organizations?${sbEq(
+      {},
+      { select: "id,name,slug,plan,created_at", order: "created_at.desc", limit: String(PLATFORM_ORG_LIST_CAP) }
+    )}`)) || [];
+
+    // Per-org counts without an RPC: pull the id columns (bounded) and fold in
+    // JS. Counts undercount past PLATFORM_SCAN_CAP, like platformStats.
+    const [memberRows, callRows, analysisRows] = await Promise.all([
+      sbGet(env, fetchImpl, `memberships?${new URLSearchParams({ select: "org_id", limit: String(PLATFORM_SCAN_CAP) })}`),
+      sbGet(env, fetchImpl, `calls?${new URLSearchParams({ select: "org_id,created_at", limit: String(PLATFORM_SCAN_CAP) })}`),
+      sbGet(env, fetchImpl, `analyses?${new URLSearchParams({ select: "org_id", limit: String(PLATFORM_SCAN_CAP) })}`)
+    ]);
+
+    const members = new Map();
+    for (const row of memberRows || []) members.set(row.org_id, (members.get(row.org_id) || 0) + 1);
+    const analyzed = new Map();
+    for (const row of analysisRows || []) analyzed.set(row.org_id, (analyzed.get(row.org_id) || 0) + 1);
+    const calls = new Map();
+    const lastActivity = new Map();
+    for (const row of callRows || []) {
+      calls.set(row.org_id, (calls.get(row.org_id) || 0) + 1);
+      const at = row.created_at;
+      if (at && (!lastActivity.has(row.org_id) || at > lastActivity.get(row.org_id))) {
+        lastActivity.set(row.org_id, at);
+      }
+    }
+
+    return json(orgs.map((org) => ({
+      id: org.id,
+      name: org.name,
+      slug: org.slug,
+      plan: org.plan,
+      created_at: org.created_at,
+      members: members.get(org.id) || 0,
+      calls: calls.get(org.id) || 0,
+      analyzed: analyzed.get(org.id) || 0,
+      last_activity: lastActivity.get(org.id) || null
+    })));
+  }
+
+  async function platformOrgDetail(orgId) {
+    if (!UUID_RE.test(orgId)) return json({ error: "bad_org_id" }, 400);
+
+    const org = (await sbGet(env, fetchImpl, `organizations?${sbEq(
+      { id: orgId },
+      { select: "id,name,slug,plan,monthly_call_quota,timezone,ai_provider,ai_model,created_at", limit: "1" }
+    )}`))?.[0];
+    if (!org) return json({ error: "org_not_found" }, 404);
+
+    const [members, usageCounters, integrations, recentCalls] = await Promise.all([
+      sbGet(env, fetchImpl, `memberships?${sbEq(
+        { org_id: orgId },
+        { select: "role,full_name,extension" }
+      )}`),
+      sbGet(env, fetchImpl, `usage_counters?${sbEq(
+        { org_id: orgId },
+        { select: "period,calls_analyzed,tokens_in,tokens_out", order: "period.desc", limit: "12" }
+      )}`),
+      // NO secrets: webhook_token and integration_secrets are never selected.
+      sbGet(env, fetchImpl, `integrations?${sbEq(
+        { org_id: orgId },
+        { select: "kind,enabled,last_event_at" }
+      )}`),
+      // No transcript join — the platform view sees metadata, never call content.
+      sbGet(env, fetchImpl, `calls?${sbEq(
+        { org_id: orgId },
+        { select: "id,direction,manager_label,started_at,duration_sec,status,created_at", order: "created_at.desc", limit: "20" }
+      )}`)
+    ]);
+
+    return json({
+      org,
+      members: members || [],
+      usage_counters: usageCounters || [],
+      integrations: (integrations || []).map((row) => ({
+        kind: row.kind,
+        enabled: row.enabled,
+        last_event_at: row.last_event_at
+      })),
+      recent_calls: recentCalls || []
+    });
+  }
+
   // --- telephony webhooks --------------------------------------------------
 
   async function handleTelephony(request, path) {
@@ -1526,8 +2274,10 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
 
     // ignore-duplicates + the (org_id, source, external_id) unique index make
     // vendor redelivery idempotent: the second POST inserts nothing.
-    await sbPost(env, fetchImpl, `calls?${new URLSearchParams({ on_conflict: "org_id,source,external_id" })}`, {
-      headers: { prefer: "resolution=ignore-duplicates" },
+    // return=representation lets us tell a fresh insert (non-empty array) from
+    // a redelivered duplicate (empty) so the pipeline fires exactly once.
+    const inserted = await sbPost(env, fetchImpl, `calls?${new URLSearchParams({ on_conflict: "org_id,source,external_id" })}`, {
+      headers: { prefer: "resolution=ignore-duplicates,return=representation" },
       body: {
         org_id: integration.org_id,
         source: kind,
@@ -1559,6 +2309,18 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
       body: { last_event_at: new Date().toISOString() }
     });
 
+    // Self-serve auto-pipeline: a freshly-inserted ANSWERED call is driven to
+    // an analysis in the background. Redelivered duplicates (empty insert
+    // array) and unanswered calls are skipped — no wasted STT/quota. The ack
+    // has already been computed and is returned right after scheduling, so the
+    // PBX never waits on the (multi-second) pipeline.
+    const freshCall = Array.isArray(inserted) ? inserted[0] : null;
+    if (freshCall?.id && event.answered) {
+      await scheduleBackground(
+        runIngestPipeline({ orgId: integration.org_id, callId: freshCall.id, kind, event })
+      );
+    }
+
     return webhookAck(kind);
   }
 
@@ -1587,6 +2349,19 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     if (path === "/api/app/join-authed" && method === "POST") return joinAuthed(request, user);
     if (path === "/api/app/orgs" && method === "POST") return createOrgAuthed(request, user);
 
+    // Platform super-admin surface. These BYPASS the org-membership guard on
+    // purpose — a platform admin need not be a member of any org — so the
+    // allow-list check is the only gate and it fails closed (see
+    // isPlatformAdmin). Every non-admin, member or not, is 403 here.
+    if (path.startsWith("/api/app/platform/")) {
+      if (!isPlatformAdmin(user)) return json({ error: "forbidden" }, 403);
+      if (path === "/api/app/platform/stats" && method === "GET") return platformStats();
+      if (path === "/api/app/platform/orgs" && method === "GET") return platformOrgs();
+      const detailMatch = path.match(/^\/api\/app\/platform\/orgs\/([^/]+)$/);
+      if (detailMatch && method === "GET") return platformOrgDetail(detailMatch[1]);
+      return json({ error: "not_found" }, 404);
+    }
+
     const orgMatch = path.match(/^\/api\/app\/orgs\/([^/]+)\/(.+)$/);
     if (!orgMatch) return json({ error: "not_found" }, 404);
 
@@ -1609,6 +2384,21 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     if (rest === "telegram" && method === "GET") return getTelegramRecipients(orgId, membership);
     if (rest === "telegram" && method === "PUT") return putTelegramRecipients(request, orgId, user, membership);
     if (rest === "org-settings" && method === "PUT") return putOrgSettings(request, orgId, user, membership);
+    if (rest === "usage" && method === "GET") return usage(orgId, membership);
+
+    if (rest === "checklists" && method === "GET") return listChecklists(orgId);
+    if (rest === "checklists" && method === "POST") return createChecklist(request, orgId, user, membership);
+    const checklistMatch = rest.match(/^checklists\/([^/]+)$/);
+    if (checklistMatch && method === "GET") return getChecklist(orgId, checklistMatch[1]);
+    if (checklistMatch && method === "PUT") return updateChecklist(request, orgId, user, membership, checklistMatch[1]);
+    if (checklistMatch && method === "DELETE") return deleteChecklist(orgId, user, membership, checklistMatch[1]);
+    const makeDefaultMatch = rest.match(/^checklists\/([^/]+)\/make-default$/);
+    if (makeDefaultMatch && method === "POST") return makeDefaultChecklist(orgId, user, membership, makeDefaultMatch[1]);
+
+    const rotateMatch = rest.match(/^integrations\/([a-z0-9_-]{1,32})\/rotate-token$/);
+    if (rotateMatch && method === "POST") {
+      return rotateIntegrationToken(orgId, user, membership, rotateMatch[1]);
+    }
 
     const credentialsMatch = rest.match(/^integrations\/([a-z0-9_-]{1,32})\/credentials$/);
     if (credentialsMatch && method === "GET") {
@@ -1620,7 +2410,11 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     return json({ error: "not_found" }, 404);
   }
 
-  async function handle(request) {
+  async function handle(request, ctx) {
+    // Stash the ExecutionContext so the telephony webhook can run its ingest
+    // pipeline via ctx.waitUntil AFTER acking. Absent in tests -> synchronous.
+    latestCtx = ctx || null;
+
     const path = new URL(request.url).pathname;
     if (!/^\/api\/(app|telephony)(\/|$)/.test(path)) return null;
 
