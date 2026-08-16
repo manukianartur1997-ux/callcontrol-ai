@@ -36,7 +36,7 @@ async function loadCalls(orgId) {
     supabase
       .from("calls")
       .select(
-        "id, direction, customer_phone, manager_id, manager_label, started_at, created_at, duration_sec, status, analyses(score, created_at)"
+        "id, direction, customer_phone, manager_id, manager_label, started_at, created_at, duration_sec, status, source, analyses(score, created_at)"
       )
       .eq("org_id", orgId)
       .order("created_at", { ascending: false })
@@ -130,7 +130,7 @@ export function Calls({ org, onNewCall }) {
                           {call.status === "analyzed" && analysis ? (
                             <ScoreBadge score={analysis.score} />
                           ) : (
-                            <StatusBadge status={call.status} />
+                            <StatusBadge status={call.status} source={call.source} />
                           )}
                         </td>
                       </tr>

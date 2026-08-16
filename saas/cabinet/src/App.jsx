@@ -25,6 +25,9 @@ import { Profile } from "./Profile.jsx";
 import { JoinToken } from "./Join.jsx";
 import { NoAccess } from "./NoAccess.jsx";
 import { NewCallModal } from "./NewCallModal.jsx";
+import { Checklists } from "./Checklists.jsx";
+import { Usage } from "./Usage.jsx";
+import { Platform } from "./Platform.jsx";
 
 export function App() {
   const [booting, setBooting] = useState(true);
@@ -87,7 +90,10 @@ function Authed({ session }) {
         setMe({
           memberships: normalizeMe(raw),
           // /me echoes the auth user with user_metadata {full_name?, avatar?}
-          meta: (raw && raw.user && raw.user.user_metadata) || {}
+          meta: (raw && raw.user && raw.user.user_metadata) || {},
+          // Platform super-admin flag (PLATFORM_ADMIN_IDS on the Worker); absent
+          // or false for everyone else. Gates the platform nav + routes.
+          isPlatformAdmin: Boolean(raw && raw.is_platform_admin)
         });
       })
       .catch((err) => {
@@ -151,7 +157,7 @@ function Authed({ session }) {
 
   return (
     <Workspace
-      me={{ user, memberships: me.memberships }}
+      me={{ user, memberships: me.memberships, isPlatformAdmin: me.isPlatformAdmin }}
       session={session}
       onSignOut={signOut}
     />
@@ -165,13 +171,18 @@ function Workspace({ me, session, onSignOut }) {
 
   const active = me.memberships.find((m) => m.org_id === orgId) || me.memberships[0];
   const canSettings = active.role === "owner" || active.role === "admin";
+  const isPlatformAdmin = Boolean(me.isPlatformAdmin);
 
-  // In-app 404 and forbidden pages redirect to the dashboard.
+  // In-app 404 and forbidden pages redirect to the dashboard. Checklists and
+  // usage share the owner/admin gate; platform is super-admin only.
   const known =
     route.page === "dashboard" ||
     route.page === "calls" ||
     route.page === "profile" ||
-    (route.page === "settings" && canSettings);
+    (route.page === "checklists" && canSettings) ||
+    (route.page === "usage" && canSettings) ||
+    (route.page === "settings" && canSettings) ||
+    (route.page === "platform" && isPlatformAdmin);
   useEffect(() => {
     if (!known) navigate("/");
   }, [known]);
@@ -190,6 +201,12 @@ function Workspace({ me, session, onSignOut }) {
     content = <CallDetail org={active} callId={route.id} />;
   } else if (route.page === "calls") {
     content = <Calls org={active} onNewCall={openNewCall} />;
+  } else if (route.page === "checklists") {
+    content = <Checklists org={active} />;
+  } else if (route.page === "usage") {
+    content = <Usage org={active} />;
+  } else if (route.page === "platform") {
+    content = <Platform orgId={route.id} />;
   } else if (route.page === "settings") {
     content = <Settings org={active} />;
   } else if (route.page === "profile") {

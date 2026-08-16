@@ -174,7 +174,10 @@ const uk = {
   nav: {
     dashboard: "Дашборд",
     calls: "Дзвінки",
+    checklists: "Чеклісти",
+    usage: "Використання",
     settings: "Налаштування",
+    platform: "Платформа",
     profile: "Профіль"
   },
 
@@ -195,7 +198,9 @@ const uk = {
     transcribed: "Чекає на аналіз",
     analyzing: "Аналізуємо…",
     analyzed: "Розібраний",
-    failed: "Помилка"
+    failed: "Помилка",
+    awaitingRecording: "очікує на запис…",
+    transcribedAnalyzing: "розшифрований, аналіз…"
   },
 
   directions: {
@@ -428,6 +433,13 @@ const uk = {
         "Напишіть нам, якщо ця АТС потрібна раніше.",
       mappingFallback:
         "Відповідальний в АТС = внутрішній номер співробітника в розділі «Команда».",
+      rotate: "Оновити адресу",
+      rotateConfirm:
+        "Оновити webhook-адресу? Старий адрес перестане працювати — доведеться прописати новий у кабінеті АТС.",
+      rotating: "Оновлюємо…",
+      rotated: "Готово. Новий шлях:",
+      rotateHint:
+        "Якщо старий URL міг витекти — оновіть його. Одразу після цього пропишіть новий у налаштуваннях вебхуків АТС.",
       kinds: {
         ringostat: "Ringostat",
         binotel: "Binotel"
@@ -485,6 +497,169 @@ const uk = {
       saved: "Збережено.",
       migrationRequired: "Стане доступно після оновлення бази (міграція 0004)."
     }
+  },
+
+  // Manifest i18n subtree: dot-paths resolved by copyGet() against the manifest
+  // labelKey/placeholderKey/titleKey/mappingHintKey. Values mirror the Russian
+  // literals kept as fallbacks in saas/worker/telephony.js.
+  providers: {
+    ringostat: {
+      title: "Ringostat",
+      mappingHint:
+        "Вихідні: співробітник визначається за staffid із вебхука — вкажіть його в полі «Внутрішній номер» учасника. Вхідні: додайте у вебхук параметр із внутрішнім номером того, хто відповів. Радимо також увімкнути у вебхук calldate_timestamp_micros — час дзвінка перестане залежати від часового поясу.",
+      fields: {
+        apiKey: {
+          label: "API-ключ (необов’язково)",
+          placeholder: "Потрібен лише для вивантаження через REST API"
+        }
+      }
+    },
+    binotel: {
+      title: "Binotel",
+      mappingHint:
+        "Співробітник визначається за internalNumber із вебхука — вкажіть його в полі «Внутрішній номер» учасника. Під час переведень береться учасник historyData з disposition=ANSWER; запасний варіант — e-mail із employeeData.",
+      fields: {
+        apiKey: { label: "API-ключ", placeholder: "Видає support@binotel.ua" },
+        apiSecret: { label: "API-секрет", placeholder: "Видає support@binotel.ua" }
+      }
+    },
+    phonet: {
+      title: "Phonet",
+      mappingHint:
+        "Співробітник визначається за внутрішнім номером (leg.ext, напр. «001») — вкажіть його в полі «Внутрішній номер» учасника. Для груп та IVR дивиться історія переведень; запасний варіант — e-mail співробітника з /rest/users.",
+      fields: {
+        accountDomain: { label: "Домен АТС", placeholder: "mycompany.phonet.com.ua" },
+        apiKey: { label: "API-ключ", placeholder: "Ключ із кабінету Phonet" }
+      }
+    },
+    unitalk: {
+      title: "UniTalk (ex-Nextel)",
+      mappingHint:
+        "Вхідні: співробітник визначається за внутрішньою лінією з call.to — вкажіть її в полі «Внутрішній номер» учасника. Вихідні: лінія оператора очікується в call.from (не підтверджено документацією — перевірте на перших дзвінках).",
+      fields: {
+        apiKey: {
+          label: "API-ключ (необов’язково)",
+          placeholder: "Сторінка «API» в кабінеті UniTalk"
+        }
+      }
+    },
+    streamtele: {
+      title: "Stream Telecom",
+      mappingHint:
+        "Вхідні: to = внутрішня лінія співробітника — вкажіть її в полі «Внутрішній номер» учасника. Вихідні: from = внутрішня лінія. Номери ліній — у «Адміністрування → Співробітники»; імені співробітника у вебхуку немає.",
+      fields: {
+        apiKey: { label: "API-ключ", placeholder: "crm.streamtele.com → Профіль компанії" }
+      }
+    }
+  },
+
+  checklists: {
+    title: "Чеклісти оцінки",
+    explainer: "Етапи та ваги, за якими AI оцінює дзвінок.",
+    create: "Новий чекліст",
+    thName: "Назва",
+    thItems: "Пунктів",
+    thWeight: "Сума ваг",
+    thDefault: "За замовчуванням",
+    defaultBadge: "за замовчуванням",
+    makeDefault: "Зробити основним",
+    edit: "Редагувати",
+    remove: "Видалити",
+    deleteConfirm: "Видалити цей чекліст? Дію не можна скасувати.",
+    defaultLockHint: "Спочатку призначте основним інший чекліст.",
+    itemsUnit: ["пункт", "пункти", "пунктів"],
+    empty: "Чеклістів ще немає.",
+    emptyHint: "Створіть перший чекліст — за ним AI оцінюватиме дзвінки.",
+    loadError: "Не вдалося завантажити чеклісти.",
+    unavailable: "Чеклісти стануть доступні після оновлення сервера.",
+    editorNew: "Новий чекліст",
+    editorEdit: "Редагування чекліста",
+    nameLabel: "Назва чекліста",
+    namePlaceholder: "напр. Вхідний дзвінок — продаж",
+    itemsTitle: "Пункти оцінки",
+    colKey: "Ключ",
+    colLabel: "Пункт",
+    colWeight: "Вага",
+    colHint: "Підказка для AI",
+    keyPlaceholder: "greeting",
+    labelPlaceholder: "напр. Привітання та назвав ім’я",
+    hintPlaceholder: "Що саме перевіряти в цьому пункті",
+    addRow: "Додати пункт",
+    weightSum: "Сума ваг: {sum} / 100",
+    weightHelper: "Ваги мають у сумі давати рівно 100.",
+    save: "Зберегти",
+    saving: "Зберігаємо…",
+    saved: "Збережено.",
+    cancel: "Скасувати",
+    needName: "Вкажіть назву чекліста.",
+    needItems: "Додайте хоча б один пункт.",
+    needWeight: "Сума ваг має дорівнювати 100."
+  },
+
+  usage: {
+    title: "Використання",
+    explainer: "Скільки дзвінків розібрано і скільки токенів витрачено за розрахунковими періодами.",
+    currentPeriod: "Поточний період",
+    statCalls: "Дзвінків розібрано",
+    statTokensIn: "Токенів на вхід",
+    statTokensOut: "Токенів на вихід",
+    statCost: "Оцінка вартості",
+    costFootnote:
+      "Оцінка: приблизна вартість за усередненими тарифами. Реальний рахунок виставляє ваш AI-провайдер.",
+    historyTitle: "Історія за 6 місяців",
+    thPeriod: "Період",
+    thCalls: "Дзвінки",
+    thTokensIn: "Токени (вхід)",
+    thTokensOut: "Токени (вихід)",
+    thCost: "Оцінка вартості",
+    empty: "Поки що немає даних про використання.",
+    loadError: "Не вдалося завантажити статистику використання.",
+    unavailable: "Статистика використання стане доступна після оновлення сервера."
+  },
+
+  platform: {
+    title: "Платформа",
+    subtitle: "Погляд суперадміністратора на всі організації. Тільки для читання.",
+    godNote: "Режим суперадміністратора — лише перегляд.",
+    totalsOrgs: "Організацій",
+    totalsMembers: "Користувачів",
+    totalsCalls: "Дзвінків",
+    totalsAnalyses: "Аналізів",
+    totalsTokens: "Токенів усього",
+    thOrg: "Організація",
+    thPlan: "Тариф",
+    thMembers: "Користувачів",
+    thCalls: "Дзвінків",
+    thCreated: "Створена",
+    open: "Відкрити",
+    empty: "Організацій ще немає.",
+    loadError: "Не вдалося завантажити дані платформи.",
+    unavailable: "Панель платформи стане доступна після оновлення сервера.",
+    backToList: "← До списку організацій",
+    detailInfo: "Інформація",
+    detailMembers: "Користувачі",
+    detailUsage: "Використання",
+    detailIntegrations: "Інтеграції",
+    detailRecentCalls: "Останні дзвінки",
+    infoPlan: "Тариф",
+    infoCreated: "Створена",
+    infoAvgDeal: "Середній чек",
+    infoCalls: "Усього дзвінків",
+    memName: "Ім’я",
+    memRole: "Роль",
+    memStatus: "Статус",
+    intKind: "АТС",
+    intStatus: "Статус",
+    intEnabled: "увімкнена",
+    intDisabled: "вимкнена",
+    intLastEvent: "Остання подія",
+    callDate: "Дата",
+    callDirection: "Напрямок",
+    callStatus: "Статус",
+    callScore: "Бал",
+    noMembers: "Користувачів немає.",
+    noIntegrations: "Інтеграцій немає.",
+    noCalls: "Дзвінків немає."
   },
 
   errors: {
@@ -678,7 +853,10 @@ const ru = {
   nav: {
     dashboard: "Дашборд",
     calls: "Звонки",
+    checklists: "Чек-листы",
+    usage: "Использование",
     settings: "Настройки",
+    platform: "Платформа",
     profile: "Профиль"
   },
 
@@ -699,7 +877,9 @@ const ru = {
     transcribed: "Ждёт анализа",
     analyzing: "Анализируем…",
     analyzed: "Разобран",
-    failed: "Ошибка"
+    failed: "Ошибка",
+    awaitingRecording: "ожидает записи…",
+    transcribedAnalyzing: "расшифрован, анализ…"
   },
 
   directions: {
@@ -932,6 +1112,13 @@ const ru = {
         "Напишите нам, если эта АТС нужна раньше.",
       mappingFallback:
         "Ответственный в АТС = внутренний номер сотрудника в разделе «Команда».",
+      rotate: "Обновить адрес",
+      rotateConfirm:
+        "Обновить webhook-адрес? Старый адрес перестанет работать — придётся прописать новый в кабинете АТС.",
+      rotating: "Обновляем…",
+      rotated: "Готово. Новый путь:",
+      rotateHint:
+        "Если старый URL мог утечь — обновите его. Сразу после этого пропишите новый в настройках вебхуков АТС.",
       kinds: {
         ringostat: "Ringostat",
         binotel: "Binotel"
@@ -989,6 +1176,168 @@ const ru = {
       saved: "Сохранено.",
       migrationRequired: "Станет доступно после обновления базы (миграция 0004)."
     }
+  },
+
+  // Manifest i18n subtree — the original Russian literals from
+  // saas/worker/telephony.js, resolved by copyGet() from the manifest key-paths.
+  providers: {
+    ringostat: {
+      title: "Ringostat",
+      mappingHint:
+        "Исходящие: сотрудник определяется по staffid из вебхука — укажите его в поле «Внутренний номер» участника. Входящие: добавьте в вебхук параметр с внутренним номером ответившего. Рекомендуем также включить в вебхук calldate_timestamp_micros — время звонка перестанет зависеть от часового пояса.",
+      fields: {
+        apiKey: {
+          label: "API-ключ (необязательно)",
+          placeholder: "Нужен только для выгрузки через REST API"
+        }
+      }
+    },
+    binotel: {
+      title: "Binotel",
+      mappingHint:
+        "Сотрудник определяется по internalNumber из вебхука — укажите его в поле «Внутренний номер» участника. При переводах берётся участник historyData с disposition=ANSWER; запасной вариант — e-mail из employeeData.",
+      fields: {
+        apiKey: { label: "API-ключ", placeholder: "Выдаёт support@binotel.ua" },
+        apiSecret: { label: "API-секрет", placeholder: "Выдаёт support@binotel.ua" }
+      }
+    },
+    phonet: {
+      title: "Phonet",
+      mappingHint:
+        "Сотрудник определяется по внутреннему номеру (leg.ext, напр. «001») — укажите его в поле «Внутренний номер» участника. Для групп и IVR смотрится история переводов; запасной вариант — e-mail сотрудника из /rest/users.",
+      fields: {
+        accountDomain: { label: "Домен АТС", placeholder: "mycompany.phonet.com.ua" },
+        apiKey: { label: "API-ключ", placeholder: "Ключ из кабинета Phonet" }
+      }
+    },
+    unitalk: {
+      title: "UniTalk (ex-Nextel)",
+      mappingHint:
+        "Входящие: сотрудник определяется по внутренней линии из call.to — укажите её в поле «Внутренний номер» участника. Исходящие: линия оператора ожидается в call.from (не подтверждено документацией — проверьте на первых звонках).",
+      fields: {
+        apiKey: {
+          label: "API-ключ (необязательно)",
+          placeholder: "Страница «API» в кабинете UniTalk"
+        }
+      }
+    },
+    streamtele: {
+      title: "Stream Telecom",
+      mappingHint:
+        "Входящие: to = внутренняя линия сотрудника — укажите её в поле «Внутренний номер» участника. Исходящие: from = внутренняя линия. Номера линий — в «Администрирование → Сотрудники»; имени сотрудника в вебхуке нет.",
+      fields: {
+        apiKey: { label: "API-ключ", placeholder: "crm.streamtele.com → Профиль компании" }
+      }
+    }
+  },
+
+  checklists: {
+    title: "Чек-листы оценки",
+    explainer: "Этапы и веса, по которым AI оценивает звонок.",
+    create: "Новый чек-лист",
+    thName: "Название",
+    thItems: "Пунктов",
+    thWeight: "Сумма весов",
+    thDefault: "По умолчанию",
+    defaultBadge: "по умолчанию",
+    makeDefault: "Сделать основным",
+    edit: "Редактировать",
+    remove: "Удалить",
+    deleteConfirm: "Удалить этот чек-лист? Действие необратимо.",
+    defaultLockHint: "Сначала назначьте основным другой чек-лист.",
+    itemsUnit: ["пункт", "пункта", "пунктов"],
+    empty: "Чек-листов пока нет.",
+    emptyHint: "Создайте первый чек-лист — по нему AI будет оценивать звонки.",
+    loadError: "Не удалось загрузить чек-листы.",
+    unavailable: "Чек-листы станут доступны после обновления сервера.",
+    editorNew: "Новый чек-лист",
+    editorEdit: "Редактирование чек-листа",
+    nameLabel: "Название чек-листа",
+    namePlaceholder: "напр. Входящий звонок — продажа",
+    itemsTitle: "Пункты оценки",
+    colKey: "Ключ",
+    colLabel: "Пункт",
+    colWeight: "Вес",
+    colHint: "Подсказка для AI",
+    keyPlaceholder: "greeting",
+    labelPlaceholder: "напр. Поздоровался и назвал имя",
+    hintPlaceholder: "Что именно проверять в этом пункте",
+    addRow: "Добавить пункт",
+    weightSum: "Сумма весов: {sum} / 100",
+    weightHelper: "Веса должны в сумме давать ровно 100.",
+    save: "Сохранить",
+    saving: "Сохраняем…",
+    saved: "Сохранено.",
+    cancel: "Отмена",
+    needName: "Укажите название чек-листа.",
+    needItems: "Добавьте хотя бы один пункт.",
+    needWeight: "Сумма весов должна равняться 100."
+  },
+
+  usage: {
+    title: "Использование",
+    explainer: "Сколько звонков разобрано и сколько токенов израсходовано по расчётным периодам.",
+    currentPeriod: "Текущий период",
+    statCalls: "Звонков разобрано",
+    statTokensIn: "Токенов на вход",
+    statTokensOut: "Токенов на выход",
+    statCost: "Оценка стоимости",
+    costFootnote:
+      "Оценка: приблизительная стоимость по усреднённым тарифам. Реальный счёт выставляет ваш AI-провайдер.",
+    historyTitle: "История за 6 месяцев",
+    thPeriod: "Период",
+    thCalls: "Звонки",
+    thTokensIn: "Токены (вход)",
+    thTokensOut: "Токены (выход)",
+    thCost: "Оценка стоимости",
+    empty: "Пока нет данных об использовании.",
+    loadError: "Не удалось загрузить статистику использования.",
+    unavailable: "Статистика использования станет доступна после обновления сервера."
+  },
+
+  platform: {
+    title: "Платформа",
+    subtitle: "Взгляд суперадминистратора на все организации. Только чтение.",
+    godNote: "Режим суперадминистратора — только просмотр.",
+    totalsOrgs: "Организаций",
+    totalsMembers: "Пользователей",
+    totalsCalls: "Звонков",
+    totalsAnalyses: "Анализов",
+    totalsTokens: "Токенов всего",
+    thOrg: "Организация",
+    thPlan: "Тариф",
+    thMembers: "Пользователей",
+    thCalls: "Звонков",
+    thCreated: "Создана",
+    open: "Открыть",
+    empty: "Организаций пока нет.",
+    loadError: "Не удалось загрузить данные платформы.",
+    unavailable: "Панель платформы станет доступна после обновления сервера.",
+    backToList: "← К списку организаций",
+    detailInfo: "Информация",
+    detailMembers: "Пользователи",
+    detailUsage: "Использование",
+    detailIntegrations: "Интеграции",
+    detailRecentCalls: "Последние звонки",
+    infoPlan: "Тариф",
+    infoCreated: "Создана",
+    infoAvgDeal: "Средний чек",
+    infoCalls: "Всего звонков",
+    memName: "Имя",
+    memRole: "Роль",
+    memStatus: "Статус",
+    intKind: "АТС",
+    intStatus: "Статус",
+    intEnabled: "включена",
+    intDisabled: "выключена",
+    intLastEvent: "Последнее событие",
+    callDate: "Дата",
+    callDirection: "Направление",
+    callStatus: "Статус",
+    callScore: "Балл",
+    noMembers: "Пользователей нет.",
+    noIntegrations: "Интеграций нет.",
+    noCalls: "Звонков нет."
   },
 
   // API / database error codes -> human text. Keys match what the Worker and
@@ -1183,7 +1532,10 @@ const en = {
   nav: {
     dashboard: "Dashboard",
     calls: "Calls",
+    checklists: "Checklists",
+    usage: "Usage",
     settings: "Settings",
+    platform: "Platform",
     profile: "Profile"
   },
 
@@ -1204,7 +1556,9 @@ const en = {
     transcribed: "Awaiting analysis",
     analyzing: "Analyzing…",
     analyzed: "Analyzed",
-    failed: "Failed"
+    failed: "Failed",
+    awaitingRecording: "awaiting recording…",
+    transcribedAnalyzing: "transcribed, analyzing…"
   },
 
   directions: {
@@ -1436,6 +1790,13 @@ const en = {
         "(migration 0004). Contact us if you need this PBX sooner.",
       mappingFallback:
         "The responsible person in the PBX = the employee's extension in the “Team” section.",
+      rotate: "Rotate URL",
+      rotateConfirm:
+        "Rotate the webhook URL? The old address will stop working — you'll need to set the new one in the PBX cabinet.",
+      rotating: "Rotating…",
+      rotated: "Done. New path:",
+      rotateHint:
+        "If the old URL might have leaked, rotate it. Right after, set the new one in your PBX webhook settings.",
       kinds: {
         ringostat: "Ringostat",
         binotel: "Binotel"
@@ -1493,6 +1854,168 @@ const en = {
       saved: "Saved.",
       migrationRequired: "Available after the database update (migration 0004)."
     }
+  },
+
+  // Manifest i18n subtree in business English, resolved by copyGet() from the
+  // manifest key-paths; the Russian manifest literals stay as fallbacks.
+  providers: {
+    ringostat: {
+      title: "Ringostat",
+      mappingHint:
+        "Outbound: the employee is resolved by the webhook's staffid — set it as the member's “Extension”. Inbound: add the answering agent's extension to the webhook. We also recommend enabling calldate_timestamp_micros in the webhook so call time no longer depends on the time zone.",
+      fields: {
+        apiKey: {
+          label: "API key (optional)",
+          placeholder: "Only needed for REST API pulls"
+        }
+      }
+    },
+    binotel: {
+      title: "Binotel",
+      mappingHint:
+        "The employee is resolved by the webhook's internalNumber — set it as the member's “Extension”. On transfers the historyData participant with disposition=ANSWER is used; the fallback is the email from employeeData.",
+      fields: {
+        apiKey: { label: "API key", placeholder: "Issued by support@binotel.ua" },
+        apiSecret: { label: "API secret", placeholder: "Issued by support@binotel.ua" }
+      }
+    },
+    phonet: {
+      title: "Phonet",
+      mappingHint:
+        "The employee is resolved by the extension (leg.ext, e.g. “001”) — set it as the member's “Extension”. For groups and IVR the transfer history is used; the fallback is the employee email from /rest/users.",
+      fields: {
+        accountDomain: { label: "PBX domain", placeholder: "mycompany.phonet.com.ua" },
+        apiKey: { label: "API key", placeholder: "Key from the Phonet cabinet" }
+      }
+    },
+    unitalk: {
+      title: "UniTalk (ex-Nextel)",
+      mappingHint:
+        "Inbound: the employee is resolved by the internal line in call.to — set it as the member's “Extension”. Outbound: the operator's line is expected in call.from (not confirmed by the docs — verify on the first calls).",
+      fields: {
+        apiKey: {
+          label: "API key (optional)",
+          placeholder: "The “API” page in the UniTalk cabinet"
+        }
+      }
+    },
+    streamtele: {
+      title: "Stream Telecom",
+      mappingHint:
+        "Inbound: to = the employee's internal line — set it as the member's “Extension”. Outbound: from = the internal line. Line numbers are under “Administration → Employees”; the webhook carries no employee name.",
+      fields: {
+        apiKey: { label: "API key", placeholder: "crm.streamtele.com → Company profile" }
+      }
+    }
+  },
+
+  checklists: {
+    title: "Scoring checklists",
+    explainer: "The stages and weights the AI uses to score a call.",
+    create: "New checklist",
+    thName: "Name",
+    thItems: "Items",
+    thWeight: "Weight sum",
+    thDefault: "Default",
+    defaultBadge: "default",
+    makeDefault: "Make default",
+    edit: "Edit",
+    remove: "Delete",
+    deleteConfirm: "Delete this checklist? This cannot be undone.",
+    defaultLockHint: "Make another checklist the default first.",
+    itemsUnit: ["item", "items"],
+    empty: "No checklists yet.",
+    emptyHint: "Create the first checklist — the AI will score calls against it.",
+    loadError: "Could not load checklists.",
+    unavailable: "Checklists become available after the server update.",
+    editorNew: "New checklist",
+    editorEdit: "Edit checklist",
+    nameLabel: "Checklist name",
+    namePlaceholder: "e.g. Inbound call — sales",
+    itemsTitle: "Scoring items",
+    colKey: "Key",
+    colLabel: "Item",
+    colWeight: "Weight",
+    colHint: "AI hint",
+    keyPlaceholder: "greeting",
+    labelPlaceholder: "e.g. Greeted and gave their name",
+    hintPlaceholder: "What exactly to check for this item",
+    addRow: "Add item",
+    weightSum: "Weight sum: {sum} / 100",
+    weightHelper: "Weights must add up to exactly 100.",
+    save: "Save",
+    saving: "Saving…",
+    saved: "Saved.",
+    cancel: "Cancel",
+    needName: "Enter a checklist name.",
+    needItems: "Add at least one item.",
+    needWeight: "Weights must add up to 100."
+  },
+
+  usage: {
+    title: "Usage",
+    explainer: "How many calls were analyzed and how many tokens were spent per billing period.",
+    currentPeriod: "Current period",
+    statCalls: "Calls analyzed",
+    statTokensIn: "Input tokens",
+    statTokensOut: "Output tokens",
+    statCost: "Cost estimate",
+    costFootnote:
+      "Estimate: approximate cost at average rates. Your AI provider issues the actual bill.",
+    historyTitle: "6-month history",
+    thPeriod: "Period",
+    thCalls: "Calls",
+    thTokensIn: "Tokens (in)",
+    thTokensOut: "Tokens (out)",
+    thCost: "Cost estimate",
+    empty: "No usage data yet.",
+    loadError: "Could not load usage statistics.",
+    unavailable: "Usage statistics become available after the server update."
+  },
+
+  platform: {
+    title: "Platform",
+    subtitle: "A super-admin view of every organization. Read-only.",
+    godNote: "Super-admin mode — read-only.",
+    totalsOrgs: "Organizations",
+    totalsMembers: "Users",
+    totalsCalls: "Calls",
+    totalsAnalyses: "Analyses",
+    totalsTokens: "Total tokens",
+    thOrg: "Organization",
+    thPlan: "Plan",
+    thMembers: "Users",
+    thCalls: "Calls",
+    thCreated: "Created",
+    open: "Open",
+    empty: "No organizations yet.",
+    loadError: "Could not load platform data.",
+    unavailable: "The platform panel becomes available after the server update.",
+    backToList: "← Back to organizations",
+    detailInfo: "Info",
+    detailMembers: "Users",
+    detailUsage: "Usage",
+    detailIntegrations: "Integrations",
+    detailRecentCalls: "Recent calls",
+    infoPlan: "Plan",
+    infoCreated: "Created",
+    infoAvgDeal: "Average deal",
+    infoCalls: "Total calls",
+    memName: "Name",
+    memRole: "Role",
+    memStatus: "Status",
+    intKind: "PBX",
+    intStatus: "Status",
+    intEnabled: "enabled",
+    intDisabled: "disabled",
+    intLastEvent: "Last event",
+    callDate: "Date",
+    callDirection: "Direction",
+    callStatus: "Status",
+    callScore: "Score",
+    noMembers: "No users.",
+    noIntegrations: "No integrations.",
+    noCalls: "No calls."
   },
 
   errors: {
@@ -1606,3 +2129,19 @@ export const copy = new Proxy(
     }
   }
 );
+
+// Resolve a dot-path (e.g. "providers.phonet.fields.apiKey.label") against the
+// ACTIVE locale dictionary and return the leaf string, or undefined if any
+// segment is missing or the leaf is not a string. The manifest i18n contract
+// (saas/worker/telephony.js) leans on this: the cabinet reads
+// copyGet(field.labelKey) ?? field.label, so an absent path degrades to the
+// manifest's own Russian fallback. Non-string input (undefined key) → undefined.
+export function copyGet(path) {
+  if (typeof path !== "string" || path === "") return undefined;
+  let node = DICTS[currentLocale];
+  for (const part of path.split(".")) {
+    if (node == null || typeof node !== "object") return undefined;
+    node = node[part];
+  }
+  return typeof node === "string" ? node : undefined;
+}

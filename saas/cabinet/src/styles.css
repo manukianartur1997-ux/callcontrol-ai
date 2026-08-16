@@ -2053,3 +2053,164 @@ a {
     padding: 8px 0;
   }
 }
+
+/* ------------------------------------------------- checklists / usage / platform */
+
+/* Sub-headline under a page title (explainer lines on the new screens). */
+.page-explainer {
+  margin: -8px 0 20px;
+  max-width: 70ch;
+}
+
+/* Right-aligned action cluster in a table row (checklist list). */
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.btn-danger {
+  color: var(--red);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(190, 18, 60, 0.08);
+}
+
+.link-like {
+  color: var(--blue);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ---- checklist editor (inside the wide modal) ---- */
+.checklist-editor {
+  padding: 16px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cl-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.cl-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.5fr) minmax(90px, 0.9fr) 72px minmax(140px, 1.6fr) 32px;
+  gap: 8px;
+  align-items: center;
+  min-width: 520px;
+}
+
+.cl-row-head {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.cl-col-x {
+  padding: 0;
+  width: 32px;
+  min-width: 32px;
+  justify-self: center;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.cl-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cl-sum {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cl-sum-ok {
+  color: var(--green);
+}
+
+.cl-sum-bad {
+  color: var(--red);
+}
+
+/* ---- key/value grid (platform org info) ---- */
+.kv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.kv dt {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+
+.kv dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+/* ---- platform god-view accent ---- */
+.god-banner {
+  align-self: flex-start;
+  background: rgba(190, 18, 60, 0.1);
+  color: var(--red);
+  border: 1px solid rgba(190, 18, 60, 0.35);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+
+.page.god .page-title {
+  color: var(--red);
+}
+
+.stat-grid-god {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+/* A distinct, cross-tenant sidebar entry for the super-admin surface. */
+.nav-link-god {
+  color: #f4b8c6;
+}
+
+.nav-link-god:hover {
+  color: #ffd7e0;
+  background: rgba(190, 18, 60, 0.18);
+}
+
+.nav-link-god.active {
+  background: rgba(190, 18, 60, 0.28);
+  color: #fff;
+}
+
+@media (max-width: 900px) {
+  .stat-grid-god {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .stat-grid-god {
+    grid-template-columns: 1fr;
+  }
+}

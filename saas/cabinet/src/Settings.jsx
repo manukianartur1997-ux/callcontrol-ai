@@ -15,12 +15,13 @@ import {
   saveAiKey,
   saveIntegrationCredentials,
   saveOrgSettings,
-  saveTelegramRecipients
+  saveTelegramRecipients,
+  rotateWebhookToken
 } from "./api.js";
 // Shared connector manifest — plain data, no worker-only imports, so vite
 // bundles it into the cabinet without dragging the Worker along.
 import { PROVIDERS as TELEPHONY_PROVIDERS } from "../../worker/telephony.js";
-import { copy } from "./copy.js";
+import { copy, copyGet } from "./copy.js";
 import { useAsync } from "./hooks.js";
 import { fmtDateTime, humanApiError } from "./format.js";
 import { Card, ErrorBox, SkeletonBlock, Spinner } from "./ui.jsx";
@@ -562,13 +563,41 @@ function AddMemberForm({ org, onAdded }) {
 // absent from the GET response — pre-0004 CHECK constraint) renders muted as
 // "soon" with a migration note instead of a webhook.
 // ---------------------------------------------------------------------------
-function providerLabel(provider) {
+// Manifest i18n contract (see saas/worker/telephony.js): a provider MAY carry
+// an i18n object { titleKey?, mappingHintKey, fields:[{key, labelKey,
+// placeholderKey}] } whose values are dot-paths into the providers.* subtree of
+// copy.js. The cabinet resolves each string as copyGet(<key>) ?? <manifest
+// literal>, so an absent subtree (or a pre-i18n manifest) degrades to the
+// manifest's own Russian fallback without a crash.
+function providerTitle(provider) {
   return (
+    copyGet(provider.i18n?.titleKey) ||
     provider.displayName ||
     provider.label ||
     copy.settings.telephony.kinds[provider.kind] ||
     provider.kind
   );
+}
+
+function providerMappingHint(provider) {
+  return (
+    copyGet(provider.i18n?.mappingHintKey) ||
+    provider.managerMappingHint ||
+    copy.settings.telephony.mappingFallback
+  );
+}
+
+// Merge the manifest's credentialFields with their i18n key-paths (matched by
+// key), tolerating either an i18n.fields array or keys placed straight on the
+// credentialField. Downstream reads copyGet(field.labelKey) ?? field.label.
+function resolveFields(provider) {
+  const byKey = {};
+  for (const f of provider.i18n?.fields || []) byKey[f.key] = f;
+  return (provider.credentialFields || []).map((f) => ({
+    ...f,
+    labelKey: f.labelKey || byKey[f.key]?.labelKey,
+    placeholderKey: f.placeholderKey || byKey[f.key]?.placeholderKey
+  }));
 }
 
 function TelephonyCard({ org }) {
@@ -635,7 +664,7 @@ function ProviderSection({ org, provider, row, open, onToggle }) {
         aria-expanded={open}
         onClick={onToggle}
       >
-        <span className="acc-title">{providerLabel(provider)}</span>
+        <span className="acc-title">{providerTitle(provider)}</span>
         <span className={connected ? "chip chip-green" : "chip chip-outline"}>
           {connected ? t.statusConnected : t.statusSoon}
         </span>
@@ -648,28 +677,34 @@ function ProviderSection({ org, provider, row, open, onToggle }) {
         <div className="acc-body">
           {connected ? (
             <>
-              <WebhookBlock row={row} />
+              <WebhookBlock org={org} row={row} />
               <CredentialsBlock org={org} provider={provider} />
             </>
           ) : (
             <p className="muted">{t.soonNote}</p>
           )}
-          <p className="field-hint">{provider.managerMappingHint || t.mappingFallback}</p>
+          <p className="field-hint">{providerMappingHint(provider)}</p>
         </div>
       ) : null}
     </section>
   );
 }
 
-function WebhookBlock({ row }) {
+function WebhookBlock({ org, row }) {
   const t = copy.settings.telephony;
   const [copied, setCopied] = useState(false);
+  // Once rotated, the fresh token/path from the Worker wins over the stale row.
+  const [rotated, setRotated] = useState(null);
+  const [rotating, setRotating] = useState(false);
+  const [rotateError, setRotateError] = useState(null);
 
   // The Worker returns a same-origin path; an absolute URL wins if present.
+  const token = rotated?.webhook_token || row.webhook_token;
   const path =
+    rotated?.webhook_path ||
     row.webhook_path ||
-    (row.webhook_token ? `/api/telephony/${row.kind}/${row.webhook_token}` : "");
-  const url = row.webhook_url || (path ? window.location.origin + path : "");
+    (token ? `/api/telephony/${row.kind}/${token}` : "");
+  const url = row.webhook_url && !rotated ? row.webhook_url : path ? window.location.origin + path : "";
 
   async function copyUrl() {
     try {
@@ -679,6 +714,23 @@ function WebhookBlock({ row }) {
     } catch {
       // Clipboard denied (http origin) — the URL is selectable text anyway.
     }
+  }
+
+  async function rotate() {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm(t.rotateConfirm)) return;
+    setRotating(true);
+    setRotateError(null);
+    try {
+      const res = await rotateWebhookToken(org.org_id, row.kind);
+      setRotated({
+        webhook_token: res?.webhook_token || null,
+        webhook_path: res?.webhook_path || null
+      });
+    } catch (err) {
+      setRotateError(err);
+    }
+    setRotating(false);
   }
 
   return (
@@ -694,8 +746,24 @@ function WebhookBlock({ row }) {
         <button type="button" className="btn btn-ghost btn-sm" onClick={copyUrl} disabled={!url}>
           {copied ? t.copied : t.copy}
         </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={rotate} disabled={rotating}>
+          {rotating ? (
+            <>
+              <Spinner small /> {t.rotating}
+            </>
+          ) : (
+            t.rotate
+          )}
+        </button>
       </div>
+      {rotated ? (
+        <p className="form-success">
+          {t.rotated} <span className="mono">{path}</span>
+        </p>
+      ) : null}
+      {rotateError ? <div className="form-error">{humanApiError(rotateError)}</div> : null}
       <p className="field-hint">{t.hint}</p>
+      <p className="field-hint">{t.rotateHint}</p>
     </div>
   );
 }
@@ -705,7 +773,7 @@ function WebhookBlock({ row }) {
 // field NAMES at most, never values.
 function CredentialsBlock({ org, provider }) {
   const t = copy.settings.telephony;
-  const fields = provider.credentialFields || [];
+  const fields = resolveFields(provider);
   const [values, setValues] = useState({});
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState(null);
@@ -762,12 +830,12 @@ function CredentialsBlock({ org, provider }) {
       <div className="field-row field-row-wrap">
         {fields.map((f) => (
           <label key={f.key} className="field">
-            <span className="label">{f.label || f.key}</span>
+            <span className="label">{copyGet(f.labelKey) ?? f.label ?? f.key}</span>
             <input
               className="input"
               type={f.secret ? "password" : "text"}
               autoComplete="off"
-              placeholder={f.placeholder || ""}
+              placeholder={copyGet(f.placeholderKey) ?? f.placeholder ?? ""}
               value={values[f.key] || ""}
               onChange={(e) =>
                 setValues((v) => ({ ...v, [f.key]: e.target.value }))

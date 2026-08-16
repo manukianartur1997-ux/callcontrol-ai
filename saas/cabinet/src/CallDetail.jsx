@@ -119,7 +119,7 @@ export function CallDetail({ org, callId }) {
           {score != null ? (
             <span className={`score-big score-${scoreTone(score)}`}>{score}</span>
           ) : (
-            <StatusBadge status={call.status} />
+            <StatusBadge status={call.status} source={call.source} />
           )}
           {score != null ? <span className="muted">{copy.call.scoreLabel}</span> : null}
         </div>

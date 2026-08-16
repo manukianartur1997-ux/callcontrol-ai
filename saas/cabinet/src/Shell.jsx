@@ -14,7 +14,16 @@ export function Shell({ me, active, route, onSwitchOrg, onSignOut, children }) {
     { page: "dashboard", href: "#/", label: copy.nav.dashboard },
     { page: "calls", href: "#/calls", label: copy.nav.calls }
   ];
-  if (canSettings) navItems.push({ page: "settings", href: "#/settings", label: copy.nav.settings });
+  if (canSettings) {
+    navItems.push({ page: "checklists", href: "#/checklists", label: copy.nav.checklists });
+    navItems.push({ page: "usage", href: "#/usage", label: copy.nav.usage });
+    navItems.push({ page: "settings", href: "#/settings", label: copy.nav.settings });
+  }
+  // Platform super-admin surface — a visually distinct god-view entry, only
+  // ever rendered when /me reported is_platform_admin.
+  const platformItem = me.isPlatformAdmin
+    ? { page: "platform", href: "#/platform", label: copy.nav.platform }
+    : null;
 
   // The user's own name (auth user_metadata) wins over the owner-managed
   // membership name; the email is the last resort. Avatar preference mirrors
@@ -60,6 +69,19 @@ export function Shell({ me, active, route, onSwitchOrg, onSignOut, children }) {
               {item.label}
             </a>
           ))}
+          {platformItem ? (
+            <a
+              key={platformItem.page}
+              href={platformItem.href}
+              className={
+                route.page === platformItem.page
+                  ? "nav-link nav-link-god active"
+                  : "nav-link nav-link-god"
+              }
+            >
+              {platformItem.label}
+            </a>
+          ) : null}
         </nav>
 
         <div className="side-user">

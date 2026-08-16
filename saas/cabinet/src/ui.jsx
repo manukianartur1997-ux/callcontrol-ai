@@ -111,8 +111,25 @@ export function ScoreBadge({ score }) {
   return <span className={`score score-${scoreTone(score)}`}>{Math.round(score)}</span>;
 }
 
-export function StatusBadge({ status }) {
-  const label = copy.statuses[status] || status;
+// Telephony-source calls flow through an automatic pipeline (webhook -> record
+// fetch -> STT -> analysis), so the neutral queue labels get a pipeline-aware
+// wording: `pending` reads "awaiting recording…", `transcribed` reads
+// "transcribed, analyzing…". Manual/uploaded calls keep the plain labels. The
+// chip color class stays keyed on the raw status.
+const TELEPHONY_SOURCES = new Set([
+  "ringostat",
+  "binotel",
+  "phonet",
+  "unitalk",
+  "streamtele"
+]);
+
+export function StatusBadge({ status, source }) {
+  let label = copy.statuses[status] || status;
+  if (source && TELEPHONY_SOURCES.has(source)) {
+    if (status === "pending") label = copy.statuses.awaitingRecording;
+    else if (status === "transcribed") label = copy.statuses.transcribedAnalyzing;
+  }
   return <span className={`chip chip-status-${status}`}>{label}</span>;
 }
 

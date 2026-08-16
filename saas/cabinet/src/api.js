@@ -134,6 +134,64 @@ export function createMember(orgId, body) {
   return apiFetch(`/orgs/${orgId}/members`, { method: "POST", body });
 }
 
+// Rotate a telephony integration's webhook token. The old URL stops working
+// immediately; the response carries the fresh { webhook_token, webhook_path }.
+// Built in parallel with the Worker — callers degrade on 404/501.
+export function rotateWebhookToken(orgId, kind) {
+  return apiFetch(`/orgs/${orgId}/integrations/${kind}/rotate-token`, { method: "POST" });
+}
+
+// ---------------------------------------------------------------------------
+// Scoring checklists — the stages/weights the AI grades a call against.
+// items: [{ key, label, weight, hint }], weights summing to 100. Every helper
+// degrades on 404/501 in the caller until the Worker endpoints ship.
+// ---------------------------------------------------------------------------
+export function fetchChecklists(orgId) {
+  return apiFetch(`/orgs/${orgId}/checklists`);
+}
+
+export function fetchChecklist(orgId, cid) {
+  return apiFetch(`/orgs/${orgId}/checklists/${cid}`);
+}
+
+export function createChecklist(orgId, body) {
+  return apiFetch(`/orgs/${orgId}/checklists`, { method: "POST", body });
+}
+
+export function updateChecklist(orgId, cid, body) {
+  return apiFetch(`/orgs/${orgId}/checklists/${cid}`, { method: "PUT", body });
+}
+
+export function makeChecklistDefault(orgId, cid) {
+  return apiFetch(`/orgs/${orgId}/checklists/${cid}/make-default`, { method: "POST" });
+}
+
+export function deleteChecklist(orgId, cid) {
+  return apiFetch(`/orgs/${orgId}/checklists/${cid}`, { method: "DELETE" });
+}
+
+// Usage counters for the org: current period + history. Shape tolerated
+// defensively by the Usage screen. 404/501 until the Worker endpoint ships.
+export function fetchUsage(orgId) {
+  return apiFetch(`/orgs/${orgId}/usage`);
+}
+
+// ---------------------------------------------------------------------------
+// Platform super-admin surface — only reachable when /me reports
+// is_platform_admin. Read-only. 404/501/403 until the Worker endpoints ship.
+// ---------------------------------------------------------------------------
+export function fetchPlatformStats() {
+  return apiFetch(`/platform/stats`);
+}
+
+export function fetchPlatformOrgs() {
+  return apiFetch(`/platform/orgs`);
+}
+
+export function fetchPlatformOrg(orgId) {
+  return apiFetch(`/platform/orgs/${orgId}`);
+}
+
 // The Worker wraps app.my_context() (see saas/migrations/0002_onboarding.sql),
 // whose rows look like { org_id, org_name, org_slug, plan, role, ... }.
 // Tolerate both the wrapped and the bare-array shape so the cabinet and the
