@@ -11,7 +11,7 @@ import {
   checkKvRateLimit,
   corsHeadersFor
 } from "./lib/lead.js";
-import { createApi, dailyDigest } from "./saas/worker/api.js";
+import { createApi, dailyDigest, purgeExpiredData } from "./saas/worker/api.js";
 
 // SaaS cabinet + telephony webhooks (saas/worker/api.js). Created lazily on
 // the first request and kept for the isolate's lifetime so its auth token
@@ -49,12 +49,18 @@ export default {
     return json({ ok: false, error: "not_found" }, 404, cors);
   },
 
-  // Cron entry (wrangler.toml [triggers]): the daily Telegram digest. dailyDigest
-  // is a silent no-op without TELEGRAM_BOT_TOKEN or the telegram_recipients
-  // table; the catch keeps a partial Telegram/Supabase outage from surfacing
-  // as a failed cron run.
+  // Cron entry (wrangler.toml [triggers]). Runs BOTH scheduled jobs each tick:
+  //   - dailyDigest: the daily Telegram digest (silent no-op without
+  //     TELEGRAM_BOT_TOKEN or the telegram_recipients table).
+  //   - purgeExpiredData: retention cleanup — scrubs raw transcript text and
+  //     recording links past each org's window (silent no-op pre-0005).
+  // allSettled + the per-job catch keep a partial Telegram/Supabase outage, or
+  // one failing job, from surfacing as a failed cron run or blocking the other.
   async scheduled(event, env, ctx) {
-    await dailyDigest(env).catch(() => {});
+    await Promise.allSettled([
+      dailyDigest(env).catch(() => {}),
+      purgeExpiredData(env).catch(() => {})
+    ]);
   }
 };
 

@@ -12,7 +12,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApi, dailyDigest } from "./api.js";
+import { createApi, dailyDigest, purgeExpiredData } from "./api.js";
 import { encryptSecret } from "./crypto.js";
 
 // ---------------------------------------------------------------------------
@@ -2647,4 +2647,298 @@ test("/me: is_platform_admin reflects the env allow list", async () => {
 
   const plain = await makeApi(mkMock(), ENV).handle(get("/api/app/me", GOOD_TOKEN));
   assert.equal((await plain.json()).is_platform_admin, false);
+});
+
+// ---------------------------------------------------------------------------
+// Per-minute billing meter + billing endpoints + retention purge (migration 0005)
+// ---------------------------------------------------------------------------
+
+// One organizations route serving BOTH the plain org read (loadOrg) and the
+// defensive billing read (loadOrgBilling), told apart by the select. Registered
+// BEFORE seed* so it wins (routes match in registration order). `missing`
+// simulates a pre-0005 database where the billing select errors.
+function seedBillingOrg(mock, { rate = null, currency = "UAH", plan = "payg", retention = 90, missing = false, quota = 500 } = {}) {
+  mock.on("GET", "/rest/v1/organizations", (record) => {
+    const wantsBilling = record.url.includes("billing_plan") || record.url.includes("rate_per_minute");
+    if (wantsBilling) {
+      if (missing) {
+        return { status: 400, body: { code: "PGRST204", message: "column organizations.billing_plan does not exist" } };
+      }
+      return { body: [{ id: ORG_ID, billing_plan: plan, rate_per_minute: rate, billing_currency: currency, retention_days: retention }] };
+    }
+    return { body: [{ id: ORG_ID, name: "Pilot Co", monthly_call_quota: quota, timezone: "Europe/Kyiv", ai_provider: "gemini", ai_model: null }] };
+  });
+}
+
+test("meter: analyze writes ONE ceil-minutes ledger line, idempotent by call_id", async () => {
+  const mock = createFetchMock();
+  seedBillingOrg(mock, { rate: null, currency: "UAH" }); // FIRST -> wins for org reads
+  await seedAnalyze(mock);
+  mock.on("POST", "/rest/v1/usage_ledger", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/analyze`, { call_id: CALL_ID }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+
+  const ledger = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/usage_ledger"));
+  assert.ok(ledger, "a ledger line was written on the analyze path");
+  assert.equal(ledger.body.org_id, ORG_ID);
+  assert.equal(ledger.body.call_id, CALL_ID);
+  assert.equal(ledger.body.minutes, 4, "ceil(187 talk-sec / 60) = 4");
+  assert.equal(ledger.body.rate, 4, "no org rate -> PLATFORM_DEFAULT_RATE");
+  assert.equal(ledger.body.currency, "UAH");
+  assert.equal(ledger.body.cost, 16, "4 minutes * 4/min");
+  assert.match(decodeURIComponent(ledger.url), /on_conflict=call_id/);
+  assert.match(String(ledger.headers.prefer || ""), /ignore-duplicates/);
+});
+
+test("meter: recordings path bills 1 minute when talk-time is unknown, at the org rate", async () => {
+  const mock = createFetchMock();
+  seedBillingOrg(mock, { rate: 5, currency: "USD" });
+  await seedRecordings(mock);
+  mock.on("POST", "/rest/v1/usage_ledger", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/recordings`, recordingBody(), GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+
+  const ledger = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/usage_ledger"));
+  assert.ok(ledger, "a ledger line was written on the recordings path too");
+  assert.equal(ledger.body.minutes, 1, "null duration -> min 1 minute");
+  assert.equal(ledger.body.rate, 5, "org override rate wins over the platform default");
+  assert.equal(ledger.body.currency, "USD");
+  assert.equal(ledger.body.cost, 5);
+});
+
+test("meter: a missing usage_ledger table is swallowed and the analysis still succeeds", async () => {
+  const mock = createFetchMock();
+  seedBillingOrg(mock, { rate: null });
+  await seedAnalyze(mock);
+  mock.on("POST", "/rest/v1/usage_ledger", {
+    status: 404,
+    body: { code: "PGRST205", message: "Could not find the table 'public.usage_ledger'" }
+  });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/analyze`, { call_id: CALL_ID }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200, "a billing failure never surfaces to the customer");
+  assert.equal((await res.json()).ok, true);
+  assert.ok(mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/analyses")), "analysis was persisted");
+  assert.ok(
+    mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/usage_ledger")),
+    "the ledger insert WAS attempted (and swallowed)"
+  );
+});
+
+test("meter: pre-0005 org (billing columns absent) skips the ledger entirely", async () => {
+  const mock = createFetchMock();
+  seedBillingOrg(mock, { missing: true }); // billing select errors -> loadOrgBilling null
+  await seedAnalyze(mock);
+  // Deliberately NO usage_ledger route: nothing must POST to it.
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/analyze`, { call_id: CALL_ID }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).ok, true);
+  assert.equal(
+    mock.requests.some((r) => r.url.includes("/rest/v1/usage_ledger")),
+    false,
+    "no ledger line even attempted before migration 0005"
+  );
+});
+
+test("billing GET: resolves rate/currency/plan and aggregates the ledger by month", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("GET", "/rest/v1/organizations", {
+    body: [{ id: ORG_ID, billing_plan: "payg", rate_per_minute: null, billing_currency: "UAH", retention_days: 90 }]
+  });
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  mock.on("GET", "/rest/v1/usage_ledger", {
+    body: [
+      { minutes: 4, cost: 16, created_at: `${thisMonth}-10T10:00:00Z` },
+      { minutes: 2, cost: 8, created_at: `${thisMonth}-05T09:00:00Z` },
+      { minutes: 3, cost: 12, created_at: "2026-01-15T09:00:00Z" }
+    ]
+  });
+
+  const res = await makeApi(mock).handle(get(`/api/app/orgs/${ORG_ID}/billing`, GOOD_TOKEN));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.plan, "payg");
+  assert.equal(body.rate_per_minute, 4, "null org rate resolves to the platform default");
+  assert.equal(body.currency, "UAH");
+  assert.equal(body.retention_days, 90);
+  assert.equal(body.current_month.minutes, 6, "4 + 2 billed this month");
+  assert.equal(body.current_month.cost, 24);
+  assert.equal(body.current_month.calls, 2);
+  assert.equal(body.history.length, 2, "two distinct calendar months");
+  assert.equal(body.history[0].period, thisMonth, "newest month first");
+});
+
+test("billing GET: 503 migration_required when the billing columns are absent", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("GET", "/rest/v1/organizations", {
+    status: 400,
+    body: { code: "PGRST204", message: "column organizations.billing_plan does not exist" }
+  });
+  const res = await makeApi(mock).handle(get(`/api/app/orgs/${ORG_ID}/billing`, GOOD_TOKEN));
+  assert.equal(res.status, 503);
+  assert.deepEqual(await res.json(), { error: "migration_required" });
+});
+
+test("billing GET: viewer is forbidden", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "viewer");
+  const res = await makeApi(mock).handle(get(`/api/app/orgs/${ORG_ID}/billing`, GOOD_TOKEN));
+  assert.equal(res.status, 403);
+});
+
+test("billing PUT: owner only, validates, and patches organizations + audit", async () => {
+  const denied = createFetchMock();
+  seedAuth(denied);
+  seedMembership(denied, "admin"); // an admin is NOT allowed to set the price
+  const forbidden = await makeApi(denied).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/billing`, { rate_per_minute: 5 }, GOOD_TOKEN)
+  );
+  assert.equal(forbidden.status, 403);
+
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("PATCH", "/rest/v1/organizations", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+  const ok = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/billing`, { rate_per_minute: 5, retention_days: 30, plan: "custom" }, GOOD_TOKEN)
+  );
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { ok: true });
+
+  const patch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/organizations"));
+  assert.deepEqual(patch.body, { rate_per_minute: 5, retention_days: 30, billing_plan: "custom" });
+  const audit = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/audit_log"));
+  assert.equal(audit.body.action, "org.billing_updated");
+});
+
+test("billing PUT: rejects bad rate/retention/plan and an empty body", async () => {
+  const bad = async (payload) => {
+    const mock = createFetchMock();
+    seedAuth(mock);
+    seedMembership(mock, "owner");
+    const res = await makeApi(mock).handle(
+      send("PUT", `/api/app/orgs/${ORG_ID}/billing`, payload, GOOD_TOKEN)
+    );
+    return res.status;
+  };
+  assert.equal(await bad({ rate_per_minute: -1 }), 400);
+  assert.equal(await bad({ retention_days: 0 }), 400);
+  assert.equal(await bad({ retention_days: 4000 }), 400);
+  assert.equal(await bad({ retention_days: 30.5 }), 400);
+  assert.equal(await bad({ plan: "enterprise" }), 400);
+  assert.equal(await bad({}), 400, "no recognised field");
+});
+
+test("billing PUT: 503 migration_required when the columns are absent", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("PATCH", "/rest/v1/organizations", {
+    status: 400,
+    body: { code: "PGRST204", message: "column organizations.rate_per_minute does not exist" }
+  });
+  const res = await makeApi(mock).handle(
+    send("PUT", `/api/app/orgs/${ORG_ID}/billing`, { rate_per_minute: 5 }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 503);
+  assert.deepEqual(await res.json(), { error: "migration_required" });
+});
+
+test("purge: blanks an old transcript, stamps redacted_at, and nulls the recording_url", async () => {
+  const mock = createFetchMock();
+  // One global, oldest-first worklist across all orgs; each row carries its own
+  // org's retention window via the FK embed. This row is years past 90 days.
+  mock.on("GET", "/rest/v1/transcripts", {
+    body: [{
+      id: "t-1",
+      call_id: CALL_ID,
+      org_id: ORG_ID,
+      created_at: "2020-01-01T00:00:00Z",
+      organizations: { retention_days: 90 }
+    }]
+  });
+  mock.on("PATCH", "/rest/v1/transcripts", { status: 204 });
+  mock.on("PATCH", "/rest/v1/calls", { status: 204 });
+
+  await purgeExpiredData(ENV, mock);
+
+  // The worklist is driven off un-redacted transcripts, oldest-first, with each
+  // row's org retention embedded — no capped org list is fetched first.
+  assert.equal(
+    mock.requests.some((r) => r.method === "GET" && r.url.includes("/rest/v1/organizations")),
+    false,
+    "no separate org list — the worklist IS the transcripts, so retention scales past any org cap"
+  );
+  const work = mock.requests.find((r) => r.method === "GET" && r.url.includes("/rest/v1/transcripts"));
+  assert.match(decodeURIComponent(work.url), /redacted_at=is\.null/);
+  assert.match(decodeURIComponent(work.url), /order=created_at\.asc/);
+  assert.match(decodeURIComponent(work.url), /organizations\(retention_days\)/);
+
+  const tPatch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/transcripts"));
+  assert.ok(tPatch, "the stale transcript was scrubbed");
+  assert.equal(tPatch.body.text, "", "raw conversation text is blanked");
+  assert.ok(tPatch.body.redacted_at, "redacted_at is stamped");
+  assert.match(decodeURIComponent(tPatch.url), /redacted_at=is\.null/, "re-checks the marker so a concurrent run cannot re-scrub");
+  assert.match(decodeURIComponent(tPatch.url), /id=in\.\(t-1\)/);
+  assert.match(decodeURIComponent(tPatch.url), new RegExp(`org_id=eq\\.${ORG_ID}`), "PATCH stays scoped to the row's org");
+
+  const cPatch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/calls"));
+  assert.equal(cPatch.body.recording_url, null, "recording link dropped");
+  assert.match(decodeURIComponent(cPatch.url), new RegExp(`id=in\\.\\(${CALL_ID}\\)`));
+});
+
+test("purge: a not-yet-due transcript is left untouched (created inside the window)", async () => {
+  const mock = createFetchMock();
+  // Un-redacted but only ~1 day old against a 90-day window: fetched by the
+  // worklist, filtered out client-side against its own org's cutoff, not scrubbed.
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString();
+  mock.on("GET", "/rest/v1/transcripts", {
+    body: [{
+      id: "t-fresh",
+      call_id: CALL_ID,
+      org_id: ORG_ID,
+      created_at: yesterday,
+      organizations: { retention_days: 90 }
+    }]
+  });
+
+  await purgeExpiredData(ENV, mock);
+  assert.equal(mock.requests.some((r) => r.method === "PATCH"), false, "inside the window -> no PATCH");
+});
+
+test("purge: an already-redacted transcript is skipped (empty worklist -> no writes)", async () => {
+  const mock = createFetchMock();
+  // redacted_at IS NULL matched nothing — the row was scrubbed on a prior run.
+  mock.on("GET", "/rest/v1/transcripts", { body: [] });
+
+  await purgeExpiredData(ENV, mock);
+  assert.equal(mock.requests.some((r) => r.method === "PATCH"), false, "nothing stale -> no PATCH");
+});
+
+test("purge: no-ops before migration 0005 (redacted_at column absent)", async () => {
+  const mock = createFetchMock();
+  mock.on("GET", "/rest/v1/transcripts", {
+    status: 400,
+    body: { code: "42703", message: "column transcripts.redacted_at does not exist" }
+  });
+
+  await purgeExpiredData(ENV, mock);
+  assert.equal(mock.requests.some((r) => r.method === "PATCH"), false, "the missing column is swallowed, nothing scrubbed");
 });

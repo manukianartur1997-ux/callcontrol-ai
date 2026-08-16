@@ -13,7 +13,15 @@ not_found_handling = "single-page-application"
 [vars]
 SUPABASE_PUBLISHABLE_KEY = "sb_publishable_F4whCRaKdrKFBtv2kevG5A_tcM1k3iS"
 
-# Daily Telegram digest — 17:00 UTC (20:00 Kyiv in summer). Handled by the
-# scheduled() export in cloudflare-worker.example.js -> dailyDigest(env).
+# Daily cron — 17:00 UTC (20:00 Kyiv in summer). The scheduled() export in
+# cloudflare-worker.example.js runs BOTH dailyDigest(env) (Telegram digest) and
+# purgeExpiredData(env) (retention cleanup: scrub raw transcript text +
+# recording links past each org's retention_days window). Both are silent
+# no-ops until their migrations (0004 / 0005) are applied.
+#
+# Per-minute billing has no env/secret of its own: the house rate is the
+# editable PLATFORM_DEFAULT_RATE constant in saas/worker/api.js and per-org
+# overrides live in organizations.rate_per_minute (migration 0005). The payment
+# gateway (Stripe/acquirer) is the operator's and hooks onto usage_ledger rows.
 [triggers]
 crons = ["0 17 * * *"]

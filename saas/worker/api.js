@@ -68,6 +68,31 @@ const GEMINI_FLASH_OUTPUT_USD_PER_1M = 0.40;
 const PLATFORM_ORG_LIST_CAP = 500;
 const PLATFORM_SCAN_CAP = 5000;
 
+// --- per-minute billing + retention (migration 0005) -----------------------
+//
+// PLATFORM_DEFAULT_RATE is the EDITABLE platform default price per analysed
+// talk-MINUTE, in the org's billing currency (UAH by default). It is charged
+// whenever an org has no rate_per_minute of its own. Change this one constant
+// to move the house rate. It is a code constant, not an env var, on purpose:
+// the pilot has a single house rate and per-org overrides live in the DB.
+const PLATFORM_DEFAULT_RATE = 4;
+const RETENTION_DEFAULT_DAYS = 90;
+const BILLING_PLANS = new Set(["payg", "trial", "custom"]);
+// Bounded ledger scan for the billing summary: PostgREST has no GROUP BY
+// without a DB view (which this pilot avoids), so the newest N ledger lines
+// are pulled and grouped into months in JS. N covers many months at pilot
+// volume; anything older simply falls outside the 6-month window shown.
+const BILLING_LEDGER_SCAN = 2000;
+
+// Retention cleanup bounds (see purgeExpiredData). One cron tick can never turn
+// into an unbounded table scan; the next tick picks up whatever is left, since
+// redacted_at IS NULL is the worklist.
+const PURGE_MAX_ROWS = 500;
+// Blanked transcript text after the retention window. `transcripts.text` is
+// NOT NULL, so a redacted row keeps an empty string (the redacted_at stamp,
+// not the text, records that scrubbing happened).
+const REDACTED_TEXT_MARKER = "";
+
 // Cost of one org-month at the gemini-flash estimate above (USD, 4 decimals).
 function estimateCostUsd(tokensIn, tokensOut) {
   const usd =
@@ -490,6 +515,66 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     return rows?.[0] || null;
   }
 
+  // Billing fields (migration 0005) read as a SEPARATE, defensive query. A
+  // PostgREST select that names a not-yet-migrated column fails the WHOLE query
+  // (PGRST204/42703), so these must never ride inside loadOrg's select — a
+  // pre-0005 database would then break every org read. `strict` decides the
+  // caller's contract:
+  //   strict=false (the meter): a missing column/table returns null so billing
+  //     silently no-ops — an analysis that already succeeded must not fail.
+  //   strict=true (the billing endpoints): the missing-column error is
+  //     re-thrown so the caller can answer 503 migration_required.
+  async function loadOrgBilling(orgId, { strict = false } = {}) {
+    try {
+      const rows = await sbGet(env, fetchImpl, `organizations?${sbEq({ id: orgId }, {
+        select: "id,billing_plan,rate_per_minute,billing_currency,retention_days",
+        limit: "1"
+      })}`);
+      return rows?.[0] || null;
+    } catch (error) {
+      if (!strict && (isMissingColumnError(error) || isMissingTableError(error))) return null;
+      throw error;
+    }
+  }
+
+  // Per-minute meter. Writes ONE usage_ledger line for a successfully analysed
+  // call and is called from the shared analysis tail, so it covers BOTH the
+  // /recordings upload path and the telephony auto-pipeline. Contract:
+  //   - Bill TALK time: minutes = ceil(duration_sec/60), min 1 (1 if null).
+  //   - rate = org.rate_per_minute ?? PLATFORM_DEFAULT_RATE; currency = org's.
+  //   - Idempotent by call_id (on_conflict + ignore-duplicates), so re-analysis
+  //     of the same call never double-bills.
+  //   - BEST-EFFORT: every error is swallowed. The analysis already succeeded
+  //     and was persisted; billing must never fail a customer-facing analysis.
+  //   - Silent no-op before migration 0005 (loadOrgBilling returns null when the
+  //     billing columns / usage_ledger table are absent).
+  //
+  // NOTE: this only RECORDS what each call costs. Turning the ledger into money
+  // (invoicing, charging a card) is the operator's Stripe/acquirer job — the
+  // payment gateway hooks onto these rows; there is deliberately none here.
+  async function meterAnalyzedCall(orgId, call) {
+    try {
+      const billing = await loadOrgBilling(orgId);
+      if (!billing) return; // pre-0005: no billing columns -> no usage_ledger
+      const durationSec = call?.duration_sec;
+      const minutes =
+        durationSec == null ? 1 : Math.max(1, Math.ceil(Number(durationSec) / 60));
+      const rate = billing.rate_per_minute ?? PLATFORM_DEFAULT_RATE;
+      const currency = billing.billing_currency || "UAH";
+      const cost = Math.round(minutes * Number(rate) * 100) / 100;
+      await sbPost(env, fetchImpl, `usage_ledger?${new URLSearchParams({
+        on_conflict: "call_id"
+      })}`, {
+        headers: { prefer: "resolution=ignore-duplicates" },
+        body: { org_id: orgId, call_id: call.id, minutes, rate, currency, cost }
+      });
+    } catch (_) {
+      // usage_ledger missing (pre-0005) or an insert on a missing column, or any
+      // transient error — swallowed. The analysis is already done and billed is
+      // best-effort; a re-analysis re-attempts the (idempotent) ledger line.
+    }
+  }
+
   // The IDOR guard. Service-role read on purpose: RLS cannot help here
   // because the service key bypasses it, so membership is checked explicitly
   // before any org data is touched.
@@ -696,6 +781,12 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
         meta: { score: result.score, tokens_in: result.tokensIn, tokens_out: result.tokensOut }
       }
     });
+
+    // Per-minute meter: record what this call cost (see meterAnalyzedCall).
+    // Runs here in the SHARED tail so both the /recordings upload path and the
+    // telephony auto-pipeline are metered. Best-effort and idempotent by
+    // call_id; a swallowed failure never turns a good analysis into an error.
+    await meterAnalyzedCall(orgId, call);
 
     // Best-effort per-call Telegram ping — a Telegram outage must never fail
     // an analysis that already succeeded and was persisted.
@@ -2088,6 +2179,120 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     });
   }
 
+  // --- per-minute billing (migration 0005) ---------------------------------
+
+  // GET billing summary: resolved rate/currency/plan/retention plus the current
+  // month and a 6-month history aggregated from usage_ledger. Owner|admin.
+  async function getBilling(orgId, membership) {
+    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+
+    let billing;
+    try {
+      billing = await loadOrgBilling(orgId, { strict: true });
+    } catch (error) {
+      if (isMissingColumnError(error) || isMissingTableError(error)) {
+        return json({ error: "migration_required" }, 503);
+      }
+      throw error;
+    }
+    if (!billing) return json({ error: "org_not_found" }, 404);
+
+    // Ledger: newest N lines, grouped into calendar months in JS (PostgREST has
+    // no GROUP BY without a DB view). A missing usage_ledger table is pre-0005.
+    let ledger;
+    try {
+      ledger = await sbGet(env, fetchImpl, `usage_ledger?${sbEq({ org_id: orgId }, {
+        select: "minutes,cost,created_at",
+        order: "created_at.desc",
+        limit: String(BILLING_LEDGER_SCAN)
+      })}`);
+    } catch (error) {
+      if (isMissingTableError(error)) return json({ error: "migration_required" }, 503);
+      throw error;
+    }
+    ledger = Array.isArray(ledger) ? ledger : [];
+
+    const byMonth = new Map();
+    for (const row of ledger) {
+      const period = String(row?.created_at || "").slice(0, 7); // YYYY-MM
+      if (!/^\d{4}-\d{2}$/.test(period)) continue;
+      const entry = byMonth.get(period) || { period, minutes: 0, cost: 0, calls: 0 };
+      entry.minutes += Number(row.minutes) || 0;
+      entry.cost += Number(row.cost) || 0;
+      entry.calls += 1;
+      byMonth.set(period, entry);
+    }
+    const round2 = (n) => Math.round(n * 100) / 100;
+    const history = [...byMonth.values()]
+      .sort((a, b) => (a.period < b.period ? 1 : -1)) // newest first
+      .slice(0, 6)
+      .map((h) => ({ period: h.period, minutes: round2(h.minutes), cost: round2(h.cost), calls: h.calls }));
+
+    const currentPeriod = new Date().toISOString().slice(0, 7);
+    const currentEntry = history.find((h) => h.period === currentPeriod);
+    const current_month = currentEntry
+      ? { minutes: currentEntry.minutes, cost: currentEntry.cost, calls: currentEntry.calls }
+      : { minutes: 0, cost: 0, calls: 0 };
+
+    return json({
+      plan: billing.billing_plan || "payg",
+      // Resolved: the org's own rate, or the platform default when it has none.
+      rate_per_minute: billing.rate_per_minute ?? PLATFORM_DEFAULT_RATE,
+      currency: billing.billing_currency || "UAH",
+      retention_days: billing.retention_days ?? RETENTION_DEFAULT_DAYS,
+      current_month,
+      history
+    });
+  }
+
+  // PUT billing settings — owner only. Validates each supplied field and PATCHes
+  // organizations. This sets the PRICE the meter records; it does NOT move
+  // money. The payment gateway (the operator's Stripe/acquirer) is where these
+  // settings and the resulting usage_ledger rows turn into an invoice/charge —
+  // hook it there, outside this worker.
+  async function putBilling(request, orgId, user, membership) {
+    if (membership.role !== "owner") return json({ error: "forbidden" }, 403);
+
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== "object") return json({ error: "bad_request" }, 400);
+
+    const patch = {};
+    if ("rate_per_minute" in body) {
+      const value = body.rate_per_minute;
+      if (value !== null) {
+        if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1e6) {
+          return json({ error: "bad_rate_per_minute" }, 400);
+        }
+      }
+      patch.rate_per_minute = value; // null = fall back to the platform default
+    }
+    if ("retention_days" in body) {
+      const value = body.retention_days;
+      if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > 3650) {
+        return json({ error: "bad_retention_days" }, 400);
+      }
+      patch.retention_days = value;
+    }
+    if ("plan" in body) {
+      if (!BILLING_PLANS.has(body.plan)) return json({ error: "bad_plan" }, 400);
+      patch.billing_plan = body.plan;
+    }
+    if (!Object.keys(patch).length) return json({ error: "bad_request" }, 400);
+
+    try {
+      await sbPatch(env, fetchImpl, `organizations?${sbEq({ id: orgId })}`, { body: patch });
+    } catch (error) {
+      if (isMissingColumnError(error) || isMissingTableError(error)) {
+        return json({ error: "migration_required" }, 503);
+      }
+      throw error;
+    }
+    await sbPost(env, fetchImpl, "audit_log", {
+      body: { org_id: orgId, actor_id: user.id, action: "org.billing_updated", meta: patch }
+    });
+    return json({ ok: true });
+  }
+
   // --- platform super-admin ------------------------------------------------
 
   // Aggregate platform stats. Big totals are exact O(1) header counts; the
@@ -2385,6 +2590,8 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     if (rest === "telegram" && method === "PUT") return putTelegramRecipients(request, orgId, user, membership);
     if (rest === "org-settings" && method === "PUT") return putOrgSettings(request, orgId, user, membership);
     if (rest === "usage" && method === "GET") return usage(orgId, membership);
+    if (rest === "billing" && method === "GET") return getBilling(orgId, membership);
+    if (rest === "billing" && method === "PUT") return putBilling(request, orgId, user, membership);
 
     if (rest === "checklists" && method === "GET") return listChecklists(orgId);
     if (rest === "checklists" && method === "POST") return createChecklist(request, orgId, user, membership);
@@ -2530,6 +2737,98 @@ export async function dailyDigest(env, fetchImpl = fetch) {
       );
     } catch (_) {
       // one broken org must not kill the other orgs' digests
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Retention cleanup (cron — runs alongside dailyDigest in the scheduled
+// handler; see cloudflare-worker.example.js)
+// ---------------------------------------------------------------------------
+
+// For each org with a retention window, drop the RAW conversation text of
+// transcripts older than the window and null the recording_url of those calls,
+// keeping the row + analysis scores. This is the legal/cost posture from
+// migration 0005: scores stay forever, raw text is scrubbed after the window.
+//
+// Idempotent: redacted_at IS NULL is the worklist, so an already-scrubbed row
+// is never touched again and the job can safely re-run. Bounded per tick
+// (PURGE_MAX_ROWS transcripts, oldest-first, across ALL orgs) so it can never
+// turn into an unbounded scan; the next tick picks up whatever remains.
+//
+// Silent no-op before migration 0005: the transcripts read/PATCH naming
+// redacted_at fails and is swallowed, so nothing is scrubbed until the
+// column exists.
+export async function purgeExpiredData(env, fetchImpl = fetch) {
+  if (!env?.SUPABASE_URL || !env?.SUPABASE_SECRET_KEY) return;
+
+  // Worklist is driven straight off the un-redacted transcripts themselves —
+  // NOT off a (capped) list of orgs — so retention holds no matter how many
+  // customers exist. Oldest-first: the rows most likely past their window are
+  // fetched first, so a bounded batch never starves a due row behind a
+  // not-yet-due one. Each row carries its own org's retention_days via the FK
+  // embed, so one global query resolves every org's window at once.
+  let stale;
+  try {
+    const workParams = new URLSearchParams({
+      select: "id,call_id,created_at,org_id,organizations(retention_days)",
+      order: "created_at.asc",
+      limit: String(PURGE_MAX_ROWS)
+    });
+    workParams.set("redacted_at", "is.null");
+    stale = await sbGet(env, fetchImpl, `transcripts?${workParams}`);
+  } catch (_) {
+    return; // pre-0005 (no redacted_at column) or Supabase down — nothing to do
+  }
+  if (!Array.isArray(stale) || !stale.length) return;
+
+  const now = Date.now();
+  const nowIso = new Date().toISOString();
+
+  // Keep only rows past their OWN org's window, then group by org so each PATCH
+  // stays scoped to a single org (defence in depth on top of the service key).
+  const byOrg = new Map();
+  for (const row of stale) {
+    if (!row?.id || !row?.org_id || !row?.created_at) continue;
+    const retentionDays =
+      Number.isFinite(row.organizations?.retention_days) && row.organizations.retention_days > 0
+        ? row.organizations.retention_days
+        : RETENTION_DEFAULT_DAYS;
+    const cutoff = now - retentionDays * 86_400_000;
+    if (new Date(row.created_at).getTime() >= cutoff) continue; // not due yet
+    if (!byOrg.has(row.org_id)) byOrg.set(row.org_id, []);
+    byOrg.get(row.org_id).push(row);
+  }
+  if (!byOrg.size) return;
+
+  for (const [orgId, rows] of byOrg) {
+    try {
+      const transcriptIds = rows.map((row) => row.id).filter(Boolean);
+      const callIds = [...new Set(rows.map((row) => row.call_id).filter(Boolean))];
+      if (!transcriptIds.length) continue;
+
+      // Blank the raw text + stamp redacted_at (idempotency marker). The scoped
+      // filter re-checks redacted_at IS NULL so a concurrent run cannot re-scrub.
+      const patchParams = new URLSearchParams();
+      patchParams.set("org_id", `eq.${orgId}`);
+      patchParams.set("id", `in.(${transcriptIds.join(",")})`);
+      patchParams.set("redacted_at", "is.null");
+      await sbPatch(env, fetchImpl, `transcripts?${patchParams}`, {
+        body: { text: REDACTED_TEXT_MARKER, redacted_at: nowIso }
+      });
+
+      // Drop the recording links on those calls; keep the call + score rows.
+      if (callIds.length) {
+        const callParams = new URLSearchParams();
+        callParams.set("org_id", `eq.${orgId}`);
+        callParams.set("id", `in.(${callIds.join(",")})`);
+        await sbPatch(env, fetchImpl, `calls?${callParams}`, {
+          body: { recording_url: null }
+        });
+      }
+    } catch (_) {
+      // Transient error on this org — skip it; other orgs still get processed
+      // and the next tick retries whatever remains un-redacted.
     }
   }
 }
