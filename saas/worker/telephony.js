@@ -862,6 +862,24 @@ function bytesToBase64(bytes) {
 // hostname literal that sits in an obvious loopback / private / link-local
 // range. This is a hostname string check only (no DNS resolution): it stops the
 // blatant cases the dossier calls out and is intentionally conservative.
+// True for any IPv4 that must never be reached from a webhook-sourced URL:
+// this-network, loopback, RFC1918 private, link-local (incl. 169.254.169.254
+// cloud metadata) and CGNAT. Octet-parsed rather than string-prefixed so that
+// "10.0.0.5" and "100.64.0.1" are judged by range, not by a loose startsWith.
+function isPrivateOrLocalIpv4(ip) {
+  const p = ip.split(".").map(Number);
+  if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+  const [a, b] = p;
+  if (a === 0) return true; // 0.0.0.0/8 "this network"
+  if (a === 127) return true; // loopback
+  if (a === 10) return true; // private class A
+  if (a === 192 && b === 168) return true; // private class C
+  if (a === 169 && b === 254) return true; // link-local (incl. cloud metadata)
+  if (a === 172 && b >= 16 && b <= 31) return true; // private class B
+  if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT 100.64.0.0/10
+  return false;
+}
+
 function isSafePublicUrl(rawUrl) {
   let parsed;
   try {
@@ -874,15 +892,22 @@ function isSafePublicUrl(rawUrl) {
   if (!host) return false;
   if (host === "localhost" || host.endsWith(".localhost")) return false;
   if (host === "0.0.0.0" || host === "::" || host === "::1") return false;
-  if (host.startsWith("127.")) return false; // loopback
-  if (host.startsWith("10.")) return false; // private class A
-  if (host.startsWith("192.168.")) return false; // private class C
-  if (host.startsWith("169.254.")) return false; // link-local (incl. cloud metadata)
-  const m172 = host.match(/^172\.(\d{1,3})\./); // 172.16.0.0 – 172.31.255.255
-  if (m172) {
-    const octet = Number(m172[1]);
-    if (octet >= 16 && octet <= 31) return false;
+
+  // Plain IPv4, or the IPv4 embedded at the tail of an IPv4-mapped IPv6 literal
+  // — ::ffff:127.0.0.1, ::ffff:169.254.169.254 (metadata), ::ffff:10.0.0.1.
+  // The old string checks were blind to the mapped form, so it slipped through.
+  const dotted = host.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (dotted && isPrivateOrLocalIpv4(dotted[1])) return false;
+
+  // IPv4-mapped IPv6 in pure hex form — ::ffff:7f00:0001 == 127.0.0.1.
+  const hexMapped = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hexMapped) {
+    const hi = parseInt(hexMapped[1], 16);
+    const lo = parseInt(hexMapped[2], 16);
+    const ip = [hi >> 8, hi & 0xff, lo >> 8, lo & 0xff].join(".");
+    if (isPrivateOrLocalIpv4(ip)) return false;
   }
+
   // IPv6 unique-local (fc00::/7) and link-local (fe80::/10) literals.
   if (host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) return false;
   return true;

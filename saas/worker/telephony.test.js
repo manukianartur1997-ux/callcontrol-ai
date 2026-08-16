@@ -960,6 +960,16 @@ test("isSafePublicUrl blocks loopback/private/link-local and non-https", () => {
   assert.equal(isSafePublicUrl("https://172.32.0.1/x"), true, "172.32 is a public range");
   assert.equal(isSafePublicUrl("https://[::1]/x"), false, "ipv6 loopback literal");
   assert.equal(isSafePublicUrl("not a url"), false);
+  // 100.64/10 CGNAT is not public reachable.
+  assert.equal(isSafePublicUrl("https://100.64.0.1/x"), false, "CGNAT");
+  assert.equal(isSafePublicUrl("https://100.63.0.1/x"), true, "100.63 is a public range");
+  // IPv4-mapped IPv6 literals must not smuggle a private/loopback/metadata IP
+  // past the guard (the regression this fixes).
+  assert.equal(isSafePublicUrl("https://[::ffff:127.0.0.1]/x"), false, "mapped loopback");
+  assert.equal(isSafePublicUrl("https://[::ffff:10.0.0.1]/x"), false, "mapped private");
+  assert.equal(isSafePublicUrl("https://[::ffff:169.254.169.254]/x"), false, "mapped cloud metadata");
+  assert.equal(isSafePublicUrl("https://[::ffff:7f00:1]/x"), false, "mapped loopback, hex form");
+  assert.equal(isSafePublicUrl("https://[::ffff:8.8.8.8]/x"), true, "mapped public is still allowed");
 });
 
 test("recordingCapabilities reports how each kind's recording is obtained", () => {

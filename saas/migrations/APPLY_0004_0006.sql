@@ -1,7 +1,7 @@
 -- ===========================================================================
 -- CallControl — APPLY THIS in the Supabase SQL editor (one paste, Run once).
 --
--- This is migrations 0004 (growth) + 0005 (billing/retention) concatenated,
+-- This is migrations 0004 (growth) + 0005 (billing/retention) + 0006 (role-cap) concatenated,
 -- for the LIVE project where 0001-0003 are ALREADY applied. Do NOT paste
 -- ALL_IN_ONE.sql on the live project — it re-creates the 0001-0003 policies and
 -- would error on "policy already exists". This file is safe to run and is
@@ -91,3 +91,31 @@ create policy usage_ledger_select on usage_ledger for select to authenticated
 -- ---------------------------------------------------------------------------
 alter table transcripts
   add column if not exists redacted_at timestamptz;
+
+-- ---------------------------------------------------------------------------
+-- 0006 · RLS role-cap: an admin can no longer mint or become an 'owner'.
+--    membership_write/invite_write previously gated only on is_org_wide (owner
+--    OR admin) with no cap on the role value — an admin could self-promote to
+--    owner via a direct PostgREST write. Only an owner may write an owner row.
+-- ---------------------------------------------------------------------------
+drop policy if exists membership_write on memberships;
+create policy membership_write on memberships for all to authenticated
+  using (
+    app.is_org_wide(org_id)
+    and (role <> 'owner' or app.is_owner(org_id))
+  )
+  with check (
+    app.is_org_wide(org_id)
+    and (role <> 'owner' or app.is_owner(org_id))
+  );
+
+drop policy if exists invite_write on invites;
+create policy invite_write on invites for all to authenticated
+  using (
+    app.is_org_wide(org_id)
+    and (role <> 'owner' or app.is_owner(org_id))
+  )
+  with check (
+    app.is_org_wide(org_id)
+    and (role <> 'owner' or app.is_owner(org_id))
+  );

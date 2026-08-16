@@ -230,4 +230,90 @@ begin
   end;
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- 9. Role-cap: an admin cannot mint or become an owner (migration 0006)
+--    This is the admin->owner privilege-escalation guard. Without 0006 an admin
+--    could self-promote via a direct PostgREST write under their own JWT.
+-- ---------------------------------------------------------------------------
+reset role;
+insert into auth.users (id, email) values
+  ('77777777-7777-7777-7777-777777777777', 'admin@alpha.test');
+insert into memberships (org_id, user_id, role, department_id) values
+  (:'alpha', '77777777-7777-7777-7777-777777777777', 'admin', null);
+
+set role authenticated;
+select act_as('77777777-7777-7777-7777-777777777777');
+
+-- (a) admin cannot RAISE an existing membership to owner
+do $$
+begin
+  begin
+    update memberships set role = 'owner'
+      where org_id = current_setting('test.alpha')::uuid
+        and user_id = '33333333-3333-3333-3333-333333333333';
+    if found then raise exception 'FAIL  admin promoted a member to owner'; end if;
+    raise notice 'PASS  admin update to owner affected no rows (USING blocks it)';
+  exception when insufficient_privilege then
+    raise notice 'PASS  admin cannot promote a member to owner';
+  when others then
+    if sqlerrm like 'FAIL%' then raise; end if;
+    raise notice 'PASS  admin promote-to-owner blocked (%).', sqlstate;
+  end;
+end $$;
+
+-- (b) admin cannot INVITE at owner level (the indirect mint path)
+do $$
+begin
+  begin
+    insert into invites (org_id, email, role, token)
+    values (current_setting('test.alpha')::uuid, 'plant@alpha.test', 'owner', 'tok-owner');
+    raise exception 'FAIL  admin created an owner-level invite';
+  exception when insufficient_privilege then
+    raise notice 'PASS  admin cannot create an owner-level invite';
+  when others then
+    if sqlerrm like 'FAIL%' then raise; end if;
+    raise notice 'PASS  admin owner-invite blocked (%).', sqlstate;
+  end;
+end $$;
+
+-- (c) positive control: admin CAN still manage non-owner roles
+update memberships set role = 'lead'
+  where org_id = current_setting('test.alpha')::uuid
+    and user_id = '33333333-3333-3333-3333-333333333333';
+select test_assert(
+  (select role from memberships
+     where org_id = current_setting('test.alpha')::uuid
+       and user_id = '33333333-3333-3333-3333-333333333333') = 'lead',
+  'admin can still set a non-owner role (manager -> lead)');
+-- restore the fixture role so later reasoning about it is unsurprising
+update memberships set role = 'manager'
+  where org_id = current_setting('test.alpha')::uuid
+    and user_id = '33333333-3333-3333-3333-333333333333';
+
+-- ---------------------------------------------------------------------------
+-- 10. New tables (0004/0005) are tenant-isolated: only org-wide roles read them
+-- ---------------------------------------------------------------------------
+reset role;
+insert into usage_ledger (org_id, call_id, minutes, rate, currency, cost) values
+  (:'alpha', 'cccccccc-0000-0000-0000-000000000001', 3, 4, 'UAH', 12);
+insert into telegram_recipients (org_id, chat_id, kind, label) values
+  (:'alpha', '123456789', 'per_call', 'Alpha ops');
+
+set role authenticated;
+
+-- Beta owner sees NONE of Alpha's billing or delivery rows
+select act_as('55555555-5555-5555-5555-555555555555');
+select test_assert((select count(*) from usage_ledger) = 0, 'Beta owner sees no Alpha ledger rows');
+select test_assert((select count(*) from telegram_recipients) = 0, 'Beta owner sees no Alpha telegram rows');
+
+-- An Alpha manager (not org-wide) sees neither (RLS select = app.is_org_wide)
+select act_as('33333333-3333-3333-3333-333333333333');
+select test_assert((select count(*) from usage_ledger) = 0, 'Alpha manager cannot see the money ledger');
+select test_assert((select count(*) from telegram_recipients) = 0, 'Alpha manager cannot see telegram routing');
+
+-- The Alpha owner does see their own org's rows
+select act_as('11111111-1111-1111-1111-111111111111');
+select test_assert((select count(*) from usage_ledger) = 1, 'Alpha owner sees their ledger');
+select test_assert((select count(*) from telegram_recipients) = 1, 'Alpha owner sees their telegram routing');
+
 select 'ALL TESTS PASSED' as result;
