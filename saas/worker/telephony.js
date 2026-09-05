@@ -493,10 +493,14 @@ export function normalizeStreamtele(payload, { tzOffsetMinutes = 0 } = {}) {
     // recordUrl ships inside Hangup (null when unanswered):
     //   https://gate.streamtele.com/api/streamtele-v3/audio?<CALL_UUID>
     // UNVERIFIED: whether the GET needs 'Authorization: Bearer <apiKey>' and
-    // whether the link expires — the download job must try a plain GET first,
-    // retry with the Bearer key, and download immediately rather than relying
+    // whether the link expires. Actual policy (fetchStreamteleRecording): ONE
+    // GET, Bearer attached up front and only to allowlisted vendor hosts; the
+    // job downloads immediately rather than relying
     // on the stored URL.
-    recordingUrl: looksLikeUrl(recordUrl) ? recordUrl : null,
+    // Falls back to scanning the raw payload for a url-looking field so the
+    // link is PERSISTED on the call row — a reingest rebuilds the event from
+    // calls.recording_url with raw:{} and would otherwise never find it.
+    recordingUrl: looksLikeUrl(recordUrl) ? recordUrl : findUrlInRaw(body) || null,
     raw: body
   };
 }
@@ -766,7 +770,7 @@ export const PROVIDER_KINDS = PROVIDERS.map((p) => p.kind);
 // - UniTalk: call.link arrives in CALL_END when state=ANSWER (auth/TTL
 //   UNVERIFIED).
 // - Stream Telecom: recordUrl arrives in Hangup (Bearer requirement and TTL
-//   UNVERIFIED — plain GET first, then retry with the apiKey).
+//   UNVERIFIED — one GET with the apiKey, attached only to vendor hosts).
 
 export async function fetchBinotelRecording({
   generalCallID,
@@ -917,25 +921,45 @@ function isSafePublicUrl(rawUrl) {
 // trusted with an organization's PBX credentials. Signed/CDN links on other
 // public hosts may still be downloaded, but secrets are attached only to the
 // provider origins confirmed by the vendor examples and our fixtures.
-const RECORDING_CREDENTIAL_DOMAINS = Object.freeze({
-  unitalk: Object.freeze(["unitalk.cloud"]),
-  streamtele: Object.freeze(["streamtele.com"])
-});
+// Vendor hosts that may receive the org's PBX secret, per kind (apex + any
+// subdomain). FIXTURE-DERIVED for two UNVERIFIED providers — if a real tenant's
+// recordings come from another vendor host (CDN/S3/regional), the key is
+// withheld, the vendor answers 401 and the call parks as no_recording; the
+// "credentials withheld" warn below names that cause in the Worker logs. Extend
+// the list from that evidence — never from an attacker-supplied URL.
+// Keep in sync with PROVIDERS/RECORDING_FETCHERS when adding a kind.
+const RECORDING_CREDENTIAL_HOSTS = {
+  unitalk: ["unitalk.cloud"],
+  streamtele: ["streamtele.com"]
+};
+const MAX_REDIRECTS = 3;
 
-function hostAllowsRecordingCredentials(kind, rawUrl) {
-  const domains = RECORDING_CREDENTIAL_DOMAINS[resolveKind(kind)];
-  if (!domains) return false;
-
-  let host;
+function tryParseUrl(rawUrl) {
   try {
-    const parsed = new URL(String(rawUrl || ""));
-    if (parsed.protocol !== "https:") return false;
-    host = parsed.hostname.toLowerCase();
+    return rawUrl instanceof URL ? rawUrl : new URL(String(rawUrl || ""));
   } catch {
-    return false;
+    return null;
   }
+}
 
-  return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+// May this kind's secret travel to this URL's host? Own-key lookup only (a
+// kind like "constructor" must fail closed, not reach Object.prototype).
+function hostAllowsRecordingCredentials(kind, urlOrParsed) {
+  const resolved = resolveKind(kind);
+  if (!Object.hasOwn(RECORDING_CREDENTIAL_HOSTS, resolved)) return false;
+  const parsed = tryParseUrl(urlOrParsed);
+  if (!parsed || parsed.protocol !== "https:") return false;
+  const host = parsed.hostname.toLowerCase();
+  return RECORDING_CREDENTIAL_HOSTS[resolved].some((d) => host === d || host.endsWith(`.${d}`));
+}
+
+// Non-secret diagnostic: kind + host + reason only. The pipeline collapses every
+// failed download into `no_recording`; this is the one line that tells an
+// operator WHICH of "key withheld (host not allowlisted)" / "vendor 401" /
+// "not audio" / "redirect blocked" it was.
+function warnRecording(kind, reason, urlOrParsed, extra = "") {
+  const host = tryParseUrl(urlOrParsed)?.hostname || "?";
+  console.warn(`[telephony] ${kind}: ${reason} host=${host}${extra ? " " + extra : ""}`);
 }
 
 // GET a URL and return { audioB64, mime } or null. Enforces the size cap and,
@@ -943,12 +967,50 @@ function hostAllowsRecordingCredentials(kind, rawUrl) {
 // logs the bytes, the URL or any header value.
 async function downloadAudio(
   url,
-  { fetchImpl = fetch, headers = {}, checkSsrf = false, defaultMime = "audio/mpeg" } = {}
+  {
+    fetchImpl = fetch,
+    headers = {},
+    checkSsrf = false,
+    defaultMime = "audio/mpeg",
+    secretParams = [],
+    kind = "recording"
+  } = {}
 ) {
-  if (checkSsrf && !isSafePublicUrl(url)) return null;
-
-  const response = await fetchImpl(url, { method: "GET", headers });
-  if (!response || !response.ok) return null;
+  // Redirects are followed BY HAND so every hop is re-validated: the SSRF
+  // guard runs on each Location (a vendor host may 302 to a private/metadata
+  // address), and credentials never cross hosts — on a cross-host hop the auth
+  // header is dropped and any secret query params are stripped. Same-host hops
+  // keep them (a vendor's own signed-download redirect).
+  let current = String(url || "");
+  let currentHeaders = { ...headers };
+  let response = null;
+  for (let hop = 0; ; hop++) {
+    if (checkSsrf && !isSafePublicUrl(current)) {
+      if (hop > 0) warnRecording(kind, "redirect_blocked_by_ssrf_guard", current);
+      return null;
+    }
+    response = await fetchImpl(current, { method: "GET", headers: currentHeaders, redirect: "manual" });
+    if (!response) return null;
+    const status = Number(response.status) || 0;
+    if (status < 300 || status >= 400) break;
+    const location = readHeader(response, "location");
+    if (!location || hop >= MAX_REDIRECTS) {
+      warnRecording(kind, location ? "too_many_redirects" : "redirect_without_location", current);
+      return null;
+    }
+    const next = tryParseUrl(new URL(location, current).toString());
+    if (!next) return null;
+    const prevHost = tryParseUrl(current)?.hostname;
+    if (next.hostname !== prevHost) {
+      currentHeaders = {};
+      for (const p of secretParams) if (next.searchParams.has(p)) next.searchParams.delete(p);
+    }
+    current = next.toString();
+  }
+  if (!response.ok) {
+    warnRecording(kind, `http_${response.status}`, current);
+    return null;
+  }
 
   const contentType = readHeader(response, "content-type");
   const mime = contentType.split(";")[0].trim().toLowerCase() || defaultMime;
@@ -1040,12 +1102,23 @@ async function fetchUnitalkRecording(event, credentials, fetchImpl) {
     const url = event.recordingUrl;
     if (!url) return null;
     let finalUrl = url;
-    if (credentials.apiKey && hostAllowsRecordingCredentials("unitalk", url)) {
-      const u = new URL(url); // throws on a malformed link → caught → null
-      u.searchParams.set("apiKey", credentials.apiKey);
-      finalUrl = u.toString();
+    const secretParams = [];
+    if (credentials.apiKey) {
+      if (hostAllowsRecordingCredentials("unitalk", url)) {
+        const u = new URL(url); // throws on a malformed link → caught → null
+        // Append only when the link does not already carry its own (per-link,
+        // vendor-signed) apiKey, and by string concat so the existing query is
+        // NOT re-serialised (re-encoding can break a signature).
+        if (!u.searchParams.has("apiKey")) {
+          const base = url.endsWith("?") ? url.slice(0, -1) : url;
+          finalUrl = `${base}${base.includes("?") ? "&" : "?"}apiKey=${encodeURIComponent(credentials.apiKey)}`;
+        }
+        secretParams.push("apiKey");
+      } else {
+        warnRecording("unitalk", "credentials_withheld_host_not_allowlisted", url);
+      }
     }
-    return await downloadAudio(finalUrl, { fetchImpl, checkSsrf: true });
+    return await downloadAudio(finalUrl, { fetchImpl, checkSsrf: true, secretParams, kind: "unitalk" });
   } catch {
     return null;
   }
@@ -1059,11 +1132,12 @@ async function fetchStreamteleRecording(event, credentials, fetchImpl) {
   try {
     const url = event.recordingUrl || findUrlInRaw(event.raw);
     if (!url) return null;
-    const headers =
-      credentials.apiKey && hostAllowsRecordingCredentials("streamtele", url)
-        ? { authorization: `Bearer ${credentials.apiKey}` }
-        : {};
-    return await downloadAudio(url, { fetchImpl, headers, checkSsrf: true });
+    let headers = {};
+    if (credentials.apiKey) {
+      if (hostAllowsRecordingCredentials("streamtele", url)) headers = { authorization: `Bearer ${credentials.apiKey}` };
+      else warnRecording("streamtele", "credentials_withheld_host_not_allowlisted", url);
+    }
+    return await downloadAudio(url, { fetchImpl, headers, checkSsrf: true, kind: "streamtele" });
   } catch {
     return null;
   }
@@ -1105,9 +1179,10 @@ export function recordingCapabilities(kind) {
     case "phonet":
       return { needsCredentials: true, source: "rest" };
     case "unitalk":
-      return { needsCredentials: false, source: "webhook" };
+      // Key is attached only to allowlisted vendor hosts — load it if present.
+      return { needsCredentials: false, optionalCredentials: true, source: "webhook" };
     case "streamtele":
-      return { needsCredentials: false, source: "webhook" };
+      return { needsCredentials: false, optionalCredentials: true, source: "webhook" };
     default:
       return null;
   }

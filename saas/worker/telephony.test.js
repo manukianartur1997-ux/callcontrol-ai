@@ -1029,11 +1029,11 @@ test("recordingCapabilities reports how each kind's recording is obtained", () =
   assert.deepEqual(recordingCapabilities("ringostat"), { needsCredentials: false, source: "webhook" });
   assert.deepEqual(recordingCapabilities("binotel"), { needsCredentials: true, source: "rest" });
   assert.deepEqual(recordingCapabilities("phonet"), { needsCredentials: true, source: "rest" });
-  assert.deepEqual(recordingCapabilities("unitalk"), { needsCredentials: false, source: "webhook" });
-  assert.deepEqual(recordingCapabilities("streamtele"), { needsCredentials: false, source: "webhook" });
+  assert.deepEqual(recordingCapabilities("unitalk"), { needsCredentials: false, optionalCredentials: true, source: "webhook" });
+  assert.deepEqual(recordingCapabilities("streamtele"), { needsCredentials: false, optionalCredentials: true, source: "webhook" });
   assert.deepEqual(
     recordingCapabilities("nextel"),
-    { needsCredentials: false, source: "webhook" },
+    { needsCredentials: false, optionalCredentials: true, source: "webhook" },
     "alias resolves to unitalk"
   );
   assert.equal(recordingCapabilities("asterisk"), null, "unknown kind");
@@ -1067,4 +1067,125 @@ test("every manifest entry carries i18n key-paths matching its credentialFields"
       assert.equal(typeof field.placeholder, "string");
     }
   }
+});
+
+
+// ---------------------------------------------------------------------------
+// Redirect hygiene + credential edge cases (review findings on 8c751ad)
+// ---------------------------------------------------------------------------
+function redirectReply(location, status = 302) {
+  return { ok: false, status, headers: { get: (k) => (k.toLowerCase() === "location" ? location : null) } };
+}
+
+test("downloadAudio: a cross-host redirect drops the Bearer header and strips the apiKey param", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    if (calls.length === 1) return redirectReply("https://cdn.attacker.test/x.mp3?apiKey=leak&sig=1");
+    return audioReply(bytes("REDIRECTED"), { contentType: "audio/mpeg" });
+  };
+  // streamtele: Bearer on hop 0 to the allowlisted host, must NOT reach hop 1
+  const result = await fetchRecording({
+    kind: "streamtele",
+    event: { recordingUrl: "https://gate.streamtele.com/rec/1", raw: {} },
+    credentials: { apiKey: "must-not-leak" },
+    fetchImpl
+  });
+  assert.ok(result, "the foreign audio is still downloaded");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].init.headers.authorization, "Bearer must-not-leak", "hop 0: vendor host gets the key");
+  assert.equal(calls[0].init.redirect, "manual", "redirects are handled by hand");
+  assert.equal(calls[1].init.headers.authorization, undefined, "hop 1 (foreign host): header dropped");
+});
+
+test("downloadAudio (unitalk): the ?apiKey= never survives a cross-host redirect", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    if (calls.length === 1) {
+      // vendor echoes the whole query to a CDN — our secret must be stripped
+      return redirectReply(`https://cdn.example.net/rec.mp3?${new URL(url).search.slice(1)}`);
+    }
+    return audioReply(bytes("CDN"), { contentType: "audio/mpeg" });
+  };
+  const event = { ...normalizeUnitalk(UNITALK_END), recordingUrl: "https://api.unitalk.cloud:8443/tracking/rec/1" };
+  const result = await fetchRecording({ kind: "unitalk", event, credentials: { apiKey: "org-key" }, fetchImpl });
+  assert.ok(result);
+  assert.equal(new URL(calls[0].url).searchParams.get("apiKey"), "org-key", "hop 0 carries the key");
+  assert.equal(new URL(calls[1].url).searchParams.has("apiKey"), false, "hop 1 (foreign host): apiKey stripped");
+});
+
+test("downloadAudio: a same-host redirect keeps the Bearer header (vendor's own signed-download hop)", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    if (calls.length === 1) return redirectReply("https://gate.streamtele.com/signed/1?sig=abc");
+    return audioReply(bytes("SAME-HOST"), { contentType: "audio/mpeg" });
+  };
+  const result = await fetchRecording({
+    kind: "streamtele",
+    event: { recordingUrl: "https://gate.streamtele.com/rec/1", raw: {} },
+    credentials: { apiKey: "k" },
+    fetchImpl
+  });
+  assert.ok(result);
+  assert.equal(calls[1].init.headers.authorization, "Bearer k");
+});
+
+test("downloadAudio: a redirect into a private/metadata address is blocked by the SSRF guard", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    if (calls.length === 1) return redirectReply("https://169.254.169.254/latest/meta-data");
+    return audioReply(bytes("SHOULD-NOT-HAPPEN"), { contentType: "audio/mpeg" });
+  };
+  const result = await fetchRecording({
+    kind: "ringostat",
+    event: { recordingUrl: "https://app.ringostat.com/rec/1", raw: {} },
+    credentials: {},
+    fetchImpl
+  });
+  assert.equal(result, null);
+  assert.equal(calls.length, 1, "the metadata hop is never requested");
+});
+
+test("downloadAudio: more than MAX_REDIRECTS hops → null (no infinite follow)", async () => {
+  let n = 0;
+  const fetchImpl = async () => {
+    n += 1;
+    return redirectReply(`https://app.ringostat.com/hop/${n}`);
+  };
+  const result = await fetchRecording({
+    kind: "ringostat",
+    event: { recordingUrl: "https://app.ringostat.com/rec/1", raw: {} },
+    credentials: {},
+    fetchImpl
+  });
+  assert.equal(result, null);
+  assert.ok(n <= 4, `bounded hops, got ${n}`);
+});
+
+test("fetchRecording unitalk: a per-link apiKey already in the URL is not overwritten or re-encoded", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    return audioReply(bytes("SIGNED"), { contentType: "audio/mpeg" });
+  };
+  const signed = "https://api.unitalk.cloud:8443/tracking/rec/1?apiKey=perLinkToken&sig=abc%2Bdef";
+  const event = { ...normalizeUnitalk(UNITALK_END), recordingUrl: signed };
+  await fetchRecording({ kind: "unitalk", event, credentials: { apiKey: "org-key" }, fetchImpl });
+  assert.equal(calls[0].url, signed, "vendor-signed link sent byte-for-byte");
+});
+
+test("hostAllowsRecordingCredentials: unknown/prototype kinds fail closed without throwing", () => {
+  const { hostAllowsRecordingCredentials } = __testing;
+  assert.equal(hostAllowsRecordingCredentials("constructor", "https://api.unitalk.cloud/x"), false);
+  assert.equal(hostAllowsRecordingCredentials("__proto__", "https://api.unitalk.cloud/x"), false);
+  assert.equal(hostAllowsRecordingCredentials("asterisk", "https://api.unitalk.cloud/x"), false);
+  assert.equal(hostAllowsRecordingCredentials("unitalk", new URL("https://my.unitalk.cloud/x")), true, "accepts a parsed URL");
+});
+
+test("normalizeStreamtele: a url under a drifted field name is persisted as recordingUrl (reingest-safe)", () => {
+  const event = normalizeStreamtele({ event: "Hangup", callId: "st-1", weird_field: "https://gate.streamtele.com/rec/9.mp3" });
+  assert.equal(event.recordingUrl, "https://gate.streamtele.com/rec/9.mp3");
 });
