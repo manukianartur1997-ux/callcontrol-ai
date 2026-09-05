@@ -913,6 +913,31 @@ function isSafePublicUrl(rawUrl) {
   return true;
 }
 
+// A recording URL is supplied by the webhook sender and therefore cannot be
+// trusted with an organization's PBX credentials. Signed/CDN links on other
+// public hosts may still be downloaded, but secrets are attached only to the
+// provider origins confirmed by the vendor examples and our fixtures.
+const RECORDING_CREDENTIAL_DOMAINS = Object.freeze({
+  unitalk: Object.freeze(["unitalk.cloud"]),
+  streamtele: Object.freeze(["streamtele.com"])
+});
+
+function hostAllowsRecordingCredentials(kind, rawUrl) {
+  const domains = RECORDING_CREDENTIAL_DOMAINS[resolveKind(kind)];
+  if (!domains) return false;
+
+  let host;
+  try {
+    const parsed = new URL(String(rawUrl || ""));
+    if (parsed.protocol !== "https:") return false;
+    host = parsed.hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+
+  return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+}
+
 // GET a URL and return { audioB64, mime } or null. Enforces the size cap and,
 // when checkSsrf is set, the private-host guard before any network call. Never
 // logs the bytes, the URL or any header value.
@@ -1007,14 +1032,15 @@ async function fetchPhonetRecording(event, credentials, fetchImpl) {
 }
 
 // UniTalk: call.link arrives in CALL_END (state=ANSWER). Auth is UNVERIFIED —
-// attach the apiKey as ?apiKey= when the org configured one. Webhook-sourced →
-// SSRF-checked (the apiKey is appended on the same host).
+// attach the apiKey as ?apiKey= only for an approved UniTalk host. A foreign
+// signed/CDN link is still fetched, but never receives the organization's
+// secret. Webhook-sourced → SSRF-checked.
 async function fetchUnitalkRecording(event, credentials, fetchImpl) {
   try {
     const url = event.recordingUrl;
     if (!url) return null;
     let finalUrl = url;
-    if (credentials.apiKey) {
+    if (credentials.apiKey && hostAllowsRecordingCredentials("unitalk", url)) {
       const u = new URL(url); // throws on a malformed link → caught → null
       u.searchParams.set("apiKey", credentials.apiKey);
       finalUrl = u.toString();
@@ -1027,13 +1053,16 @@ async function fetchUnitalkRecording(event, credentials, fetchImpl) {
 
 // Stream Telecom: UNVERIFIED. recordUrl ships inside Hangup; its field name may
 // drift, so fall back to scanning the raw payload for a url. Auth is UNVERIFIED
-// too — attach the apiKey as a Bearer header when present. Webhook-sourced →
-// SSRF-checked.
+// too — attach the apiKey as a Bearer header only for an approved Stream
+// Telecom host. Webhook-sourced → SSRF-checked.
 async function fetchStreamteleRecording(event, credentials, fetchImpl) {
   try {
     const url = event.recordingUrl || findUrlInRaw(event.raw);
     if (!url) return null;
-    const headers = credentials.apiKey ? { authorization: `Bearer ${credentials.apiKey}` } : {};
+    const headers =
+      credentials.apiKey && hostAllowsRecordingCredentials("streamtele", url)
+        ? { authorization: `Bearer ${credentials.apiKey}` }
+        : {};
     return await downloadAudio(url, { fetchImpl, headers, checkSsrf: true });
   } catch {
     return null;
@@ -1118,6 +1147,7 @@ export const __testing = {
   epochToIso,
   looksLikeUrl,
   isSafePublicUrl,
+  hostAllowsRecordingCredentials,
   findUrlInRaw,
   MAX_AUDIO_BYTES
 };

@@ -831,6 +831,36 @@ test("fetchRecording unitalk: downloads call.link, attaching apiKey when present
   assert.ok(noKey.audioB64);
 });
 
+test("recording credentials are restricted to real provider domains", () => {
+  const { hostAllowsRecordingCredentials } = __testing;
+  assert.equal(hostAllowsRecordingCredentials("unitalk", "https://api.unitalk.cloud:8443/x"), true);
+  assert.equal(hostAllowsRecordingCredentials("unitalk", "https://unitalk.cloud.attacker.test/x"), false);
+  assert.equal(hostAllowsRecordingCredentials("unitalk", "https://evil-unitalk.cloud/x"), false);
+  assert.equal(hostAllowsRecordingCredentials("streamtele", "https://gate.streamtele.com/x"), true);
+  assert.equal(hostAllowsRecordingCredentials("streamtele", "https://streamtele.com.attacker.test/x"), false);
+  assert.equal(hostAllowsRecordingCredentials("streamtele", "http://gate.streamtele.com/x"), false);
+});
+
+test("fetchRecording unitalk: never appends apiKey to a foreign webhook URL", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    return audioReply(bytes("foreign-unitalk"), { contentType: "audio/mpeg" });
+  };
+  const event = { ...normalizeUnitalk(UNITALK_END), recordingUrl: "https://attacker.test/x.mp3" };
+
+  const result = await fetchRecording({
+    kind: "unitalk",
+    event,
+    credentials: { apiKey: "must-not-leak" },
+    fetchImpl
+  });
+
+  assert.equal(calls[0].url, "https://attacker.test/x.mp3");
+  assert.equal(new URL(calls[0].url).searchParams.has("apiKey"), false);
+  assert.ok(result);
+});
+
 test("fetchRecording streamtele: uses recordUrl and sends apiKey as a Bearer header", async () => {
   const audio = bytes("STREAM-RECORDING");
   const calls = [];
@@ -862,6 +892,29 @@ test("fetchRecording streamtele: falls back to a url-looking field in raw", asyn
   };
   const result = await fetchRecording({ kind: "streamtele", event, credentials: {}, fetchImpl });
   assert.equal(calls[0], "https://gate.streamtele.com/api/rec?zzz");
+  assert.ok(result);
+});
+
+test("fetchRecording streamtele: never sends Bearer key to a foreign raw-payload URL", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, init });
+    return audioReply(bytes("foreign-streamtele"), { contentType: "audio/mpeg" });
+  };
+  const event = {
+    recordingUrl: null,
+    raw: { event: "Hangup", weird_field: "https://attacker.test/x.mp3" }
+  };
+
+  const result = await fetchRecording({
+    kind: "streamtele",
+    event,
+    credentials: { apiKey: "must-not-leak" },
+    fetchImpl
+  });
+
+  assert.equal(calls[0].url, "https://attacker.test/x.mp3");
+  assert.equal(calls[0].init.headers.authorization, undefined);
   assert.ok(result);
 });
 
