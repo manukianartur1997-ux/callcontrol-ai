@@ -29,7 +29,7 @@ import {
 } from "./ui.jsx";
 
 async function loadCall(orgId, callId) {
-  const [call, checklists, members] = await Promise.all([
+  const [call, checklists, members, feedback] = await Promise.all([
     supabase
       .from("calls")
       .select(
@@ -39,7 +39,9 @@ async function loadCall(orgId, callId) {
       .eq("id", callId)
       .maybeSingle(),
     supabase.from("checklists").select("id, name, items, is_default").eq("org_id", orgId),
-    supabase.from("memberships").select("user_id, full_name").eq("org_id", orgId)
+    supabase.from("memberships").select("user_id, full_name").eq("org_id", orgId),
+    // Best-effort: pre-0008 (table absent) must not break the whole call view.
+    supabase.from("analysis_feedback").select("actor_id, rating, comment").eq("call_id", callId)
   ]);
   if (call.error) throw call.error;
   if (checklists.error) throw checklists.error;
@@ -47,7 +49,8 @@ async function loadCall(orgId, callId) {
   return {
     call: call.data,
     checklists: checklists.data || [],
-    membersByUserId: Object.fromEntries((members.data || []).map((m) => [m.user_id, m]))
+    membersByUserId: Object.fromEntries((members.data || []).map((m) => [m.user_id, m])),
+    feedback: feedback.error ? [] : feedback.data || []
   };
 }
 
@@ -291,6 +294,8 @@ export function CallDetail({ org, callId }) {
               </div>
             </Card>
           ) : null}
+
+          <FeedbackWidget org={org} callId={callId} feedback={data.feedback} onSaved={reload} />
         </>
       ) : null}
 
@@ -312,5 +317,99 @@ function BackLink() {
       {"← "}
       {copy.call.back}
     </a>
+  );
+}
+
+// "Was this analysis useful?" — 👍/👎 + an optional comment, one vote per
+// person per call (unique(call_id, actor_id) + upsert). Visibility follows
+// the call exactly (RLS re-applies calls' own select policy), so the team's
+// aggregate is shown to everyone who can see the call; only the write is
+// self-scoped (actor_id = auth.uid(), enforced server-side). Hidden for
+// viewers (RLS would refuse the write anyway) and before any feedback table
+// exists (pre-0008 — loadCall already swallows that into an empty list).
+function FeedbackWidget({ org, callId, feedback, onSaved }) {
+  const t = copy.call;
+  const mine = feedback.find((f) => f.actor_id === org.user_id) || null;
+  const [rating, setRating] = useState(mine?.rating || null);
+  const [comment, setComment] = useState(mine?.comment || "");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState(null);
+
+  if (org.role === "viewer") return null;
+
+  const up = feedback.filter((f) => f.rating === "up").length;
+  const down = feedback.filter((f) => f.rating === "down").length;
+
+  async function vote(nextRating) {
+    setRating(nextRating);
+    setSaved(false);
+    setErr(null);
+    setBusy(true);
+    const { error } = await supabase.from("analysis_feedback").upsert(
+      {
+        org_id: org.org_id,
+        call_id: callId,
+        actor_id: org.user_id,
+        rating: nextRating,
+        comment: comment.trim() || null
+      },
+      { onConflict: "call_id,actor_id" }
+    );
+    setBusy(false);
+    if (error) setErr(error);
+    else {
+      setSaved(true);
+      onSaved();
+    }
+  }
+
+  async function saveComment(e) {
+    e.preventDefault();
+    if (!rating) return;
+    await vote(rating);
+  }
+
+  return (
+    <Card title={t.feedbackTitle}>
+      <div className="field-row">
+        <button
+          type="button"
+          className={rating === "up" ? "chip chip-green" : "chip chip-gray"}
+          onClick={() => vote("up")}
+          disabled={busy}
+        >
+          {t.feedbackUp}
+        </button>
+        <button
+          type="button"
+          className={rating === "down" ? "chip chip-red" : "chip chip-gray"}
+          onClick={() => vote("down")}
+          disabled={busy}
+        >
+          {t.feedbackDown}
+        </button>
+        <span className="muted">
+          {t.feedbackTeamVotes.replace("{up}", up).replace("{down}", down)}
+        </span>
+      </div>
+      {rating ? (
+        <form className="field-row field-row-wrap" onSubmit={saveComment} style={{ marginTop: "0.5rem" }}>
+          <input
+            className="input"
+            type="text"
+            placeholder={t.feedbackCommentPlaceholder}
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            disabled={busy}
+          />
+          <button type="submit" className="btn btn-ghost" disabled={busy}>
+            {busy ? <Spinner small /> : t.feedbackSave}
+          </button>
+        </form>
+      ) : null}
+      {saved ? <p className="form-ok">{t.feedbackSaved}</p> : null}
+      {err ? <ErrorBox error={err} /> : null}
+    </Card>
   );
 }

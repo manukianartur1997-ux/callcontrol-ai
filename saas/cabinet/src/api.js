@@ -167,6 +167,13 @@ export function createMember(orgId, body) {
   return apiFetch(`/orgs/${orgId}/members`, { method: "POST", body });
 }
 
+// members: [{ email, full_name, extension, role }]. Each row gets a FRESH
+// generated password, returned once in the response (never sent by the
+// caller, never logged) — see saas/worker/api.js generatePassword.
+export function createMembersBulk(orgId, members) {
+  return apiFetch(`/orgs/${orgId}/members/bulk`, { method: "POST", body: { members } });
+}
+
 // Rotate a telephony integration's webhook token. The old URL stops working
 // immediately; the response carries the fresh { webhook_token, webhook_path }.
 // Built in parallel with the Worker — callers degrade on 404/501.

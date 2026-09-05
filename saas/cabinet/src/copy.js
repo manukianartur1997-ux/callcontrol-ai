@@ -285,7 +285,9 @@ const uk = {
     empty: "Дзвінків поки немає. Почніть із кнопки «Новий дзвінок».",
     emptyFiltered: "Під цей фільтр дзвінків не потрапило.",
     unassigned: "Не призначено",
-    noPhone: "без номера"
+    noPhone: "без номера",
+    exportCsv: "Експорт CSV",
+    thStatus: "Статус"
   },
 
   newCall: {
@@ -346,7 +348,14 @@ const uk = {
     notFound: "Дзвінок не знайдено або у вас немає до нього доступу.",
     pendingTitle: "Дзвінок ще не розібрано",
     pendingText: "Він у черзі на аналіз — оновіть сторінку за хвилину.",
-    failedTitle: "Аналіз не вдався"
+    failedTitle: "Аналіз не вдався",
+    feedbackTitle: "Корисний розбір?",
+    feedbackUp: "Так, влучно",
+    feedbackDown: "Ні, помилка",
+    feedbackCommentPlaceholder: "Що саме не так? (необов’язково)",
+    feedbackSave: "Зберегти",
+    feedbackSaved: "Дякуємо за відгук",
+    feedbackTeamVotes: "Команда: {up} 👍 · {down} 👎"
   },
 
   settings: {
@@ -447,7 +456,19 @@ const uk = {
       extension: "Внутрішній номер",
       submit: "Додати",
       submitting: "Додаємо…",
-      added: "Співробітника додано."
+      added: "Співробітника додано.",
+      bulkToggle: "Додати списком",
+      bulkTitle: "Додати кілька співробітників",
+      bulkHint:
+        "Один рядок — одна людина: email; ім’я; внутрішній номер; роль. " +
+        "Роль і внутрішній номер можна пропустити (роль за замовчуванням — менеджер).",
+      bulkPlaceholder: "ivan@company.com; Іван Іванов; 101; manager\npetro@company.com; Петро Коваль; 102",
+      bulkSubmit: "Додати всіх",
+      bulkSubmitting: "Додаємо…",
+      bulkResultsTitle: "Результат",
+      bulkCopyAll: "Скопіювати паролі",
+      bulkCopied: "Скопійовано",
+      bulkPasswordWord: "пароль"
     },
 
     telephony: {
@@ -1040,7 +1061,9 @@ const ru = {
     empty: "Звонков пока нет. Начните с кнопки «Новый звонок».",
     emptyFiltered: "Под этот фильтр звонков не попало.",
     unassigned: "Не назначен",
-    noPhone: "без номера"
+    noPhone: "без номера",
+    exportCsv: "Экспорт CSV",
+    thStatus: "Статус"
   },
 
   newCall: {
@@ -1101,7 +1124,14 @@ const ru = {
     notFound: "Звонок не найден или у вас нет к нему доступа.",
     pendingTitle: "Звонок ещё не разобран",
     pendingText: "Он в очереди на анализ — обновите страницу через минуту.",
-    failedTitle: "Анализ не удался"
+    failedTitle: "Анализ не удался",
+    feedbackTitle: "Разбор полезен?",
+    feedbackUp: "Да, точно",
+    feedbackDown: "Нет, ошибка",
+    feedbackCommentPlaceholder: "Что именно не так? (необязательно)",
+    feedbackSave: "Сохранить",
+    feedbackSaved: "Спасибо за отзыв",
+    feedbackTeamVotes: "Команда: {up} 👍 · {down} 👎"
   },
 
   settings: {
@@ -1202,7 +1232,19 @@ const ru = {
       extension: "Внутренний номер",
       submit: "Добавить",
       submitting: "Добавляем…",
-      added: "Сотрудник добавлен."
+      added: "Сотрудник добавлен.",
+      bulkToggle: "Добавить списком",
+      bulkTitle: "Добавить несколько сотрудников",
+      bulkHint:
+        "Одна строка — один человек: email; имя; внутренний номер; роль. " +
+        "Роль и внутренний номер можно пропустить (роль по умолчанию — менеджер).",
+      bulkPlaceholder: "ivan@company.com; Иван Иванов; 101; manager\npetro@company.com; Петро Коваль; 102",
+      bulkSubmit: "Добавить всех",
+      bulkSubmitting: "Добавляем…",
+      bulkResultsTitle: "Результат",
+      bulkCopyAll: "Скопировать пароли",
+      bulkCopied: "Скопировано",
+      bulkPasswordWord: "пароль"
     },
 
     telephony: {
@@ -1795,7 +1837,9 @@ const en = {
     empty: "No calls yet. Start with the “New call” button.",
     emptyFiltered: "No calls match this filter.",
     unassigned: "Unassigned",
-    noPhone: "no number"
+    noPhone: "no number",
+    exportCsv: "Export CSV",
+    thStatus: "Status"
   },
 
   newCall: {
@@ -1856,7 +1900,14 @@ const en = {
     notFound: "The call was not found, or you don't have access to it.",
     pendingTitle: "The call is not analyzed yet",
     pendingText: "It is queued for analysis — refresh the page in a minute.",
-    failedTitle: "Analysis failed"
+    failedTitle: "Analysis failed",
+    feedbackTitle: "Was this analysis useful?",
+    feedbackUp: "Yes, accurate",
+    feedbackDown: "No, wrong",
+    feedbackCommentPlaceholder: "What was off? (optional)",
+    feedbackSave: "Save",
+    feedbackSaved: "Thanks for the feedback",
+    feedbackTeamVotes: "Team: {up} 👍 · {down} 👎"
   },
 
   settings: {
@@ -1956,7 +2007,19 @@ const en = {
       extension: "Extension",
       submit: "Add",
       submitting: "Adding…",
-      added: "Team member added."
+      added: "Team member added.",
+      bulkToggle: "Add in bulk",
+      bulkTitle: "Add several teammates at once",
+      bulkHint:
+        "One line per person: email; name; extension; role. " +
+        "Role and extension can be omitted (role defaults to manager).",
+      bulkPlaceholder: "ivan@company.com; Ivan Ivanov; 101; manager\npetro@company.com; Petro Koval; 102",
+      bulkSubmit: "Add all",
+      bulkSubmitting: "Adding…",
+      bulkResultsTitle: "Result",
+      bulkCopyAll: "Copy passwords",
+      bulkCopied: "Copied",
+      bulkPasswordWord: "password"
     },
 
     telephony: {

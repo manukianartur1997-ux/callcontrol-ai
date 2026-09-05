@@ -170,7 +170,10 @@ function Workspace({ me, session, onSignOut }) {
   const [orgId, setOrgId] = useState(me.memberships[0].org_id);
   const [newCallOpen, setNewCallOpen] = useState(false);
 
-  const active = me.memberships.find((m) => m.org_id === orgId) || me.memberships[0];
+  // user_id is folded in here (memberships don't carry it) so any screen that
+  // needs "am I the author of this row" — e.g. the per-call feedback widget —
+  // gets it from the same `org` prop it already receives, no extra plumbing.
+  const active = { ...(me.memberships.find((m) => m.org_id === orgId) || me.memberships[0]), user_id: me.user.id };
   const canSettings = active.role === "owner" || active.role === "admin";
   const isPlatformAdmin = Boolean(me.isPlatformAdmin);
 

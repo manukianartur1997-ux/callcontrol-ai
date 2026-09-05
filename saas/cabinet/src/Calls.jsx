@@ -31,6 +31,58 @@ const FILTER_LABELS = {
   failed: copy.calls.filterFailed
 };
 
+// A field that could contain a comma, quote or newline is quoted with
+// doubled-quote escaping — the one RFC 4180 rule that actually matters here
+// (customer names/comments are the only free-text fields in a call row).
+function csvField(value) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+// Exports exactly the rows on screen (respects the active status filter) —
+// "what you see is what you get" beats a second, differently-scoped query.
+// A UTF-8 BOM prefix is required for Excel to render Cyrillic correctly
+// instead of mangling it as Windows-1252.
+function callsToCsv(rows, membersByUserId) {
+  const header = [
+    copy.calls.thDate,
+    copy.calls.thClient,
+    copy.calls.thManager,
+    copy.calls.thDuration,
+    copy.calls.thScore,
+    copy.calls.thStatus
+  ];
+  const lines = [header.map(csvField).join(",")];
+  for (const call of rows) {
+    const analysis = latestAnalysis(call.analyses);
+    lines.push(
+      [
+        fmtDateTime(call.started_at || call.created_at),
+        call.customer_phone || "",
+        managerName(call, membersByUserId),
+        call.duration_sec ?? "",
+        analysis ? Math.round(Number(analysis.score)) : "",
+        call.status
+      ]
+        .map(csvField)
+        .join(",")
+    );
+  }
+  return "\uFEFF" + lines.join("\r\n");
+}
+
+function downloadCsv(filename, content) {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function loadCalls(orgId) {
   const [calls, members] = await Promise.all([
     supabase
@@ -61,15 +113,26 @@ export function Calls({ org, onNewCall }) {
     (c) => !active.statuses || active.statuses.includes(c.status)
   );
 
+  function exportCsv() {
+    const csv = callsToCsv(rows, data.membersByUserId);
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadCsv(`calls-${filter}-${stamp}.csv`, csv);
+  }
+
   return (
     <div className="page">
       <div className="page-head">
         <h1 className="page-title">{copy.calls.title}</h1>
-        {canCreate ? (
-          <button type="button" className="btn btn-primary" onClick={onNewCall}>
-            {copy.calls.newCall}
+        <div className="field-row">
+          <button type="button" className="btn btn-ghost" onClick={exportCsv} disabled={rows.length === 0}>
+            {copy.calls.exportCsv}
           </button>
-        ) : null}
+          {canCreate ? (
+            <button type="button" className="btn btn-primary" onClick={onNewCall}>
+              {copy.calls.newCall}
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <div className="chip-row" role="tablist">

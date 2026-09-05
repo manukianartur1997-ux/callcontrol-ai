@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase.js";
 import {
   createMember,
+  createMembersBulk,
   fetchAiKey,
   fetchBilling,
   fetchIntegrations,
@@ -460,8 +461,127 @@ function TeamCard({ org }) {
       )}
 
       <AddMemberForm org={org} onAdded={reload} />
+      <BulkAddForm org={org} onAdded={reload} />
       <InviteLinkBlock org={org} />
     </Card>
+  );
+}
+
+// Paste-a-list onboarding: one text box, one row per person
+// (email; full name; extension; role), submitted as a single bulk request.
+// Reuses the SAME server-side validation as the single-add form — a bad row
+// never aborts the rest of the paste, and each row reports its own outcome.
+// Rows never carry a password: the Worker generates a fresh one per row and
+// returns it exactly once, here, for the admin to copy and hand out.
+const ROLE_ALIASES = { owner: "manager", admin: "manager" }; // never bulk-mint either
+function parseBulkRows(text) {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [email, fullName, extension, role] = line.split(";").map((s) => (s || "").trim());
+      const safeRole = role ? (ROLE_ALIASES[role] || role) : "manager";
+      return { email, full_name: fullName || "", extension: extension || null, role: safeRole };
+    });
+}
+
+function BulkAddForm({ org, onAdded }) {
+  const t = copy.settings.team;
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [results, setResults] = useState(null);
+  const [error, setError] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    const rows = parseBulkRows(text);
+    if (!rows.length) return;
+    setBusy(true);
+    setError(null);
+    setResults(null);
+    setCopied(false);
+    try {
+      const { results: rowResults } = await createMembersBulk(org.org_id, rows);
+      setResults(rowResults);
+      if (rowResults.some((r) => r.ok)) onAdded();
+    } catch (err) {
+      setError(err);
+    }
+    setBusy(false);
+  }
+
+  async function copyPasswords() {
+    const lines = (results || [])
+      .filter((r) => r.ok)
+      .map((r) => `${r.email}: ${r.password}`);
+    try {
+      await navigator.clipboard.writeText(lines.join("\n"));
+      setCopied(true);
+    } catch (_) {
+      // clipboard may be blocked — the table below is selectable either way
+    }
+  }
+
+  if (!open) {
+    return (
+      <button type="button" className="btn btn-ghost" onClick={() => setOpen(true)}>
+        {t.bulkToggle}
+      </button>
+    );
+  }
+
+  return (
+    <div className="bulk-add-block">
+      <h3 className="sub-title">{t.bulkTitle}</h3>
+      <p className="muted">{t.bulkHint}</p>
+      <form onSubmit={submit}>
+        <textarea
+          className="input textarea"
+          rows={5}
+          placeholder={t.bulkPlaceholder}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          disabled={busy}
+        />
+        <div className="modal-actions">
+          <button type="submit" className="btn btn-primary" disabled={busy || !text.trim()}>
+            {busy ? <Spinner small /> : t.bulkSubmit}
+          </button>
+        </div>
+      </form>
+      {error ? <ErrorBox error={error} /> : null}
+      {results ? (
+        <div className="table-wrap">
+          <h4 className="sub-title">{t.bulkResultsTitle}</h4>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>{t.email}</th>
+                <th>{t.bulkPasswordWord}</th>
+                <th>{t.thStatus}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map((r, i) => (
+                <tr key={i}>
+                  <td>{r.email}</td>
+                  <td>{r.ok ? <code>{r.password}</code> : "—"}</td>
+                  <td>{r.ok ? "✓" : humanApiError(r.error)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {results.some((r) => r.ok) ? (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={copyPasswords}>
+              {copied ? t.bulkCopied : t.bulkCopyAll}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
