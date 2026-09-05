@@ -13,15 +13,26 @@ not_found_handling = "single-page-application"
 [vars]
 SUPABASE_PUBLISHABLE_KEY = "sb_publishable_F4whCRaKdrKFBtv2kevG5A_tcM1k3iS"
 
-# Daily cron — 17:00 UTC (20:00 Kyiv in summer). The scheduled() export in
-# cloudflare-worker.example.js runs BOTH dailyDigest(env) (Telegram digest) and
-# purgeExpiredData(env) (retention cleanup: scrub raw transcript text +
-# recording links past each org's retention_days window). Both are silent
-# no-ops until their migrations (0004 / 0005) are applied.
+# Two cron triggers, branched by event.cron in scheduled():
+#   "0 17 * * *"    daily, 17:00 UTC (20:00 Kyiv in summer) — dailyDigest (per-
+#                   org Telegram digest), purgeExpiredData (retention scrub),
+#                   platformDigest (operator-facing summary to
+#                   PLATFORM_ALERT_CHAT_ID). Silent no-ops until their
+#                   migrations (0004/0005/0008) are applied or the relevant
+#                   secret is set.
+#   "*/30 * * * *"  every 30 minutes — sweepStuckCalls (migration 0008): a call
+#                   stuck on a setup gap that may now be fixed (AI key pasted,
+#                   checklist created, PBX credentials added) retries itself,
+#                   capped at RETRY_MAX_ATTEMPTS (saas/worker/api.js) so a
+#                   permanently-broken org does not retry forever.
 #
 # Per-minute billing has no env/secret of its own: the house rate is the
 # editable PLATFORM_DEFAULT_RATE constant in saas/worker/api.js and per-org
 # overrides live in organizations.rate_per_minute (migration 0005). The payment
 # gateway (Stripe/acquirer) is the operator's and hooks onto usage_ledger rows.
+#
+# PLATFORM_ALERT_CHAT_ID (optional secret, `wrangler secret put`): a Telegram
+# chat id of the OPERATOR (Артур), separate from any client's own
+# telegram_recipients. Without it platformDigest silently no-ops.
 [triggers]
-crons = ["0 17 * * *"]
+crons = ["0 17 * * *", "*/30 * * * *"]

@@ -316,4 +316,99 @@ select act_as('11111111-1111-1111-1111-111111111111');
 select test_assert((select count(*) from usage_ledger) = 1, 'Alpha owner sees their ledger');
 select test_assert((select count(*) from telegram_recipients) = 1, 'Alpha owner sees their telegram routing');
 
+-- ---------------------------------------------------------------------------
+-- 11. analysis_feedback (migration 0008): visibility follows the call, write
+--     is self-only, one vote per (call, person) via upsert.
+-- ---------------------------------------------------------------------------
+reset role;
+set role authenticated;
+
+-- Alpha manager (33...) can feedback their OWN call (cccccccc-...0001).
+select act_as('33333333-3333-3333-3333-333333333333');
+insert into analysis_feedback (org_id, call_id, actor_id, rating, comment)
+values (:'alpha', 'cccccccc-0000-0000-0000-000000000001',
+        '33333333-3333-3333-3333-333333333333', 'up', 'Точно подметил возражение');
+select test_assert((select count(*) from analysis_feedback) = 1, 'manager feedback on own call inserted');
+
+-- Same manager cannot feedback the OTHER department's call (out of scope).
+do $$
+begin
+  begin
+    insert into analysis_feedback (org_id, call_id, actor_id, rating)
+    values (current_setting('test.alpha')::uuid, 'cccccccc-0000-0000-0000-000000000002',
+            '33333333-3333-3333-3333-333333333333', 'down');
+    raise exception 'FAIL  manager voted on a call outside their scope';
+  exception
+    when insufficient_privilege then
+      raise notice 'PASS  manager cannot vote on an out-of-scope call';
+    when others then
+      if sqlstate = 'P0001' and sqlerrm like 'FAIL%' then raise; end if;
+      raise notice 'PASS  out-of-scope feedback blocked (%).', sqlstate;
+  end;
+end $$;
+
+-- Cannot post feedback AS someone else (actor_id spoofing).
+do $$
+begin
+  begin
+    insert into analysis_feedback (org_id, call_id, actor_id, rating)
+    values (current_setting('test.alpha')::uuid, 'cccccccc-0000-0000-0000-000000000001',
+            '11111111-1111-1111-1111-111111111111', 'up');
+    raise exception 'FAIL  manager posted feedback as the owner';
+  exception
+    when insufficient_privilege then
+      raise notice 'PASS  cannot post feedback under another user''s actor_id';
+    when others then
+      if sqlstate = 'P0001' and sqlerrm like 'FAIL%' then raise; end if;
+      raise notice 'PASS  actor_id spoofing blocked (%).', sqlstate;
+  end;
+end $$;
+
+-- Beta owner (different tenant) sees nothing from Alpha's feedback.
+select act_as('55555555-5555-5555-5555-555555555555');
+select test_assert((select count(*) from analysis_feedback) = 0, 'Beta owner sees no Alpha feedback');
+
+-- One vote per (call, person): voting again UPDATES, does not duplicate.
+select act_as('33333333-3333-3333-3333-333333333333');
+insert into analysis_feedback (org_id, call_id, actor_id, rating)
+values (:'alpha', 'cccccccc-0000-0000-0000-000000000001',
+        '33333333-3333-3333-3333-333333333333', 'down')
+on conflict (call_id, actor_id) do update set rating = excluded.rating;
+select test_assert(
+  (select count(*) from analysis_feedback where call_id = 'cccccccc-0000-0000-0000-000000000001') = 1,
+  'second vote replaces the first, does not duplicate'
+);
+select test_assert(
+  (select rating from analysis_feedback where call_id = 'cccccccc-0000-0000-0000-000000000001') = 'down',
+  'the replaced vote is the new rating'
+);
+
+-- The lead (22...) can see the manager's feedback on a call in their own
+-- department (visibility follows the call, exactly like transcripts).
+select act_as('22222222-2222-2222-2222-222222222222');
+select test_assert((select count(*) from analysis_feedback) = 1, 'lead sees feedback on a call in their department');
+
+-- ---------------------------------------------------------------------------
+-- 12. webhook_rate_limits (migration 0008): locked to service_role, same
+--     pattern as org_ai_keys/integration_secrets — no policies at all, so an
+--     authenticated user (any role, including owner) sees and writes NOTHING.
+-- ---------------------------------------------------------------------------
+select act_as('11111111-1111-1111-1111-111111111111'); -- Alpha owner
+select test_assert((select count(*) from webhook_rate_limits) = 0, 'owner sees zero rate-limit rows (RLS-locked)');
+
+do $$
+begin
+  begin
+    insert into webhook_rate_limits (integration_id, minute_bucket, count)
+    values ('11111111-1111-1111-1111-111111111111', 1, 1);
+    raise exception 'FAIL  an authenticated owner wrote to webhook_rate_limits';
+  exception
+    when insufficient_privilege then
+      raise notice 'PASS  webhook_rate_limits has no authenticated write path';
+    when others then
+      if sqlstate = 'P0001' and sqlerrm like 'FAIL%' then raise; end if;
+      raise notice 'PASS  webhook_rate_limits write blocked (%).', sqlstate;
+  end;
+end $$;
+
 select 'ALL TESTS PASSED' as result;

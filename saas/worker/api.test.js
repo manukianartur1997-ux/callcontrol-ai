@@ -659,6 +659,84 @@ test("webhook: an oversized body is rejected before parsing", async () => {
   );
 });
 
+// ---------------------------------------------------------------------------
+// Webhook rate limit (migration 0008) — a courtesy backstop, not the hard
+// boundary (that stays monthly_call_quota). Fails OPEN on any error.
+// ---------------------------------------------------------------------------
+
+test("webhook rate limit: under the cap, the event is stored and the bucket increments", async () => {
+  const mock = createFetchMock();
+  seedWebhook(mock, "ringostat", RINGO_TOKEN);
+  mock.on("GET", "/rest/v1/webhook_rate_limits", { body: [{ count: 5 }] });
+  mock.on("PATCH", "/rest/v1/webhook_rate_limits", { status: 204 });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/telephony/ringostat/${RINGO_TOKEN}`, RINGOSTAT_COMPLETED)
+  );
+  assert.equal(res.status, 200);
+  assert.ok(mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/calls")), "event stored");
+  const patch = mock.requests.find((r) => r.method === "PATCH" && r.url.includes("/rest/v1/webhook_rate_limits"));
+  assert.equal(patch.body.count, 6);
+});
+
+test("webhook rate limit: the FIRST event of a minute creates the bucket row", async () => {
+  const mock = createFetchMock();
+  seedWebhook(mock, "ringostat", RINGO_TOKEN);
+  mock.on("GET", "/rest/v1/webhook_rate_limits", { body: [] });
+  mock.on("POST", "/rest/v1/webhook_rate_limits", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/telephony/ringostat/${RINGO_TOKEN}`, RINGOSTAT_COMPLETED)
+  );
+  assert.equal(res.status, 200);
+  const created = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/webhook_rate_limits"));
+  assert.equal(created.body.count, 1);
+  assert.equal(created.body.integration_id, INTEGRATION_ID);
+  assert.match(decodeURIComponent(created.url), /on_conflict=integration_id,minute_bucket/);
+  assert.match(String(created.headers.prefer || ""), /ignore-duplicates/);
+});
+
+test("webhook rate limit: at the cap, the event is acked but NOTHING is stored", async () => {
+  const mock = createFetchMock();
+  seedWebhook(mock, "ringostat", RINGO_TOKEN);
+  mock.on("GET", "/rest/v1/webhook_rate_limits", { body: [{ count: 120 }] });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/telephony/ringostat/${RINGO_TOKEN}`, RINGOSTAT_COMPLETED)
+  );
+  assert.equal(res.status, 200, "still acked — never signals 'blocked' to the sender");
+  assert.deepEqual(await res.json(), { ok: true });
+  assert.equal(mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/calls")), false);
+  assert.equal(mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/audit_log")), false);
+  assert.equal(mock.requests.some((r) => r.method === "PATCH" && r.url.includes("/rest/v1/webhook_rate_limits")), false);
+});
+
+test("webhook rate limit: binotel over the cap still gets its literal ack (no 7x redelivery storm)", async () => {
+  const mock = createFetchMock();
+  seedWebhook(mock, "binotel", RINGO_TOKEN);
+  mock.on("GET", "/rest/v1/webhook_rate_limits", { body: [{ count: 999 }] });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/telephony/binotel/${RINGO_TOKEN}`, BINOTEL_COMPLETED)
+  );
+  assert.deepEqual(await res.json(), { status: "success" });
+});
+
+test("webhook rate limit: pre-0008 (missing table) fails OPEN — the event still goes through", async () => {
+  const mock = createFetchMock();
+  seedWebhook(mock, "ringostat", RINGO_TOKEN);
+  mock.on("GET", "/rest/v1/webhook_rate_limits", {
+    status: 404,
+    body: { code: "PGRST205", message: "Could not find the table 'public.webhook_rate_limits'" }
+  });
+
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/telephony/ringostat/${RINGO_TOKEN}`, RINGOSTAT_COMPLETED)
+  );
+  assert.equal(res.status, 200);
+  assert.ok(mock.requests.some((r) => r.method === "POST" && r.url.includes("/rest/v1/calls")), "event still stored");
+});
+
 // A ctx whose waitUntil captures the backgrounded promise — the production
 // path the old tests never exercised (no ctx was ever passed, and the calls
 // insert returned no representation body, so the fire gate could not run).
@@ -3375,4 +3453,337 @@ test("reingest: a non-telephony (manual) call is not reingestable (409)", async 
   );
   assert.equal(res.status, 409);
   assert.equal((await res.json()).error, "not_reingestable");
+});
+
+// ---------------------------------------------------------------------------
+// Self-healing retry sweep (migration 0008)
+// ---------------------------------------------------------------------------
+
+function sweepReq() {
+  const mock = createFetchMock();
+  return mock;
+}
+
+test("sweep: a pending telephony call with a fixable error is retried and its retry_count bumped", async () => {
+  const mock = sweepReq();
+  mock.on("GET", "/rest/v1/calls", (record) => {
+    if (record.url.includes("status=eq.pending")) {
+      return { body: [{ id: CALL_ID, org_id: ORG_ID, source: "ringostat", retry_count: 2 }] };
+    }
+    if (record.url.includes("status=eq.transcribed")) return { body: [] };
+    // ingestCall's own read of the call row, keyed by id only
+    return { body: [{ id: CALL_ID, org_id: ORG_ID, status: "pending", manager_label: "Іван", direction: "outbound", duration_sec: null, external_id: "x-1", recording_url: null }] };
+  });
+  mock.on("PATCH", "/rest/v1/calls", { status: 204 });
+  mock.on("GET", "/rest/v1/organizations", { body: [{ id: ORG_ID, monthly_call_quota: 500, timezone: "Europe/Kyiv", ai_provider: "gemini", ai_model: null }] });
+  mock.on("GET", "/rest/v1/integrations", { body: [] }); // no PBX credentials on file -> credentials {}
+
+  const api = makeApi(mock);
+  await api.sweepStuckCalls();
+
+  // retry_count bumped BEFORE the retry attempt.
+  const bump = mock.requests.find(
+    (r) => r.method === "PATCH" && r.url.includes("/rest/v1/calls") && r.body.retry_count === 3
+  );
+  assert.ok(bump, "retry_count incremented from 2 to 3");
+
+  // The work-list query filters on the reason + the retry cap.
+  const listReq = mock.requests.find((r) => r.method === "GET" && r.url.includes("status=eq.pending"));
+  assert.match(decodeURIComponent(listReq.url), /error=in\.\(ai_key_missing,no_recording\)/);
+  assert.match(decodeURIComponent(listReq.url), /retry_count=lt\.8/);
+
+  // The pipeline actually ran (no recording configured here -> stays pending
+  // with no_recording, proving runIngestPipeline was invoked, not skipped).
+  const settled = mock.requests.find(
+    (r) => r.method === "PATCH" && r.url.includes("/rest/v1/calls") && r.body.error === "no_recording"
+  );
+  assert.ok(settled, "the ingest pipeline actually ran for the stuck call");
+});
+
+test("sweep: a non-telephony source in the worklist is skipped (defence in depth)", async () => {
+  const mock = sweepReq();
+  mock.on("GET", "/rest/v1/calls", (record) => {
+    if (record.url.includes("status=eq.pending")) {
+      return { body: [{ id: CALL_ID, org_id: ORG_ID, source: "manual", retry_count: 0 }] };
+    }
+    return { body: [] };
+  });
+
+  await makeApi(mock).sweepStuckCalls();
+  assert.equal(mock.requests.some((r) => r.method === "PATCH"), false, "a manual-source row is never retried");
+});
+
+test("sweep: a transcribed call with a checklist now available is scored and billed a new slot", async () => {
+  const mock = sweepReq();
+  mock.on("GET", "/rest/v1/calls", (record) => {
+    if (record.url.includes("status=eq.pending")) return { body: [] };
+    if (record.url.includes("status=eq.transcribed") && record.url.includes("retry_count")) {
+      return { body: [{ id: CALL_ID, org_id: ORG_ID, retry_count: 0 }] };
+    }
+    // retryTranscribedAnalysis's own read, scoped to status=transcribed + id
+    return { body: [{ id: CALL_ID, manager_label: "Іван", direction: "outbound", duration_sec: 120 }] };
+  });
+  mock.on("PATCH", "/rest/v1/calls", { status: 204 });
+  mock.on("GET", "/rest/v1/organizations", { body: [{ id: ORG_ID, monthly_call_quota: 500, timezone: "Europe/Kyiv", ai_provider: "gemini", ai_model: null }] });
+  mock.on("GET", "/rest/v1/transcripts", { body: [{ text: TRANSCRIPT }] });
+  mock.on("GET", "/rest/v1/checklists", { body: [{ id: CHECKLIST_ID, items: CHECKLIST_ITEMS }] });
+  mock.on("GET", "/rest/v1/org_ai_keys", { body: [{ key_ciphertext: await encryptSecret(GEMINI_PLAIN_KEY, MASTER_KEY) }] });
+  mock.on("POST", "generativelanguage.googleapis.com", { status: 200, body: GEMINI_OK });
+  mock.on("POST", "/rest/v1/analyses", { status: 201 });
+  mock.on("GET", "/rest/v1/usage_counters", { body: [] });
+  mock.on("POST", "/rest/v1/usage_counters", (record) => ({ status: 201, body: [record.body] }));
+  mock.on("PATCH", "/rest/v1/usage_counters", (record) => ({ status: 200, body: [record.body] }));
+  mock.on("PATCH", "/rest/v1/org_ai_keys", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+
+  await makeApi(mock).sweepStuckCalls();
+
+  const analyzed = mock.requests.find(
+    (r) => r.method === "PATCH" && r.url.includes("/rest/v1/calls") && r.body.status === "analyzed"
+  );
+  assert.ok(analyzed, "the retried analysis actually scored the call");
+  const slot = mock.requests.find((r) => r.method === "POST" && r.url.includes("/rest/v1/usage_counters"));
+  assert.ok(slot, "a NEW quota slot was reserved for the retry, exactly like a manual re-analyze");
+});
+
+test("sweep: no-ops before migration 0008 (retry_count column absent)", async () => {
+  const mock = sweepReq();
+  mock.on("GET", "/rest/v1/calls", {
+    status: 400,
+    body: { code: "42703", message: "column calls.retry_count does not exist" }
+  });
+  await makeApi(mock).sweepStuckCalls();
+  assert.equal(mock.requests.some((r) => r.method === "PATCH"), false);
+});
+
+test("purge: also sweeps stale webhook_rate_limits buckets (older than ~1 day)", async () => {
+  const mock = createFetchMock();
+  mock.on("DELETE", "/rest/v1/webhook_rate_limits", { status: 204 });
+  mock.on("GET", "/rest/v1/organizations", { body: [] });
+
+  await purgeExpiredData(ENV, mock);
+
+  const del = mock.requests.find((r) => r.method === "DELETE" && r.url.includes("/rest/v1/webhook_rate_limits"));
+  assert.ok(del, "old rate-limit buckets are cleaned up");
+  assert.match(decodeURIComponent(del.url), /minute_bucket=lt\.\d+/);
+});
+
+test("purge: a missing webhook_rate_limits table does not block the retention scrub", async () => {
+  const mock = createFetchMock();
+  mock.on("DELETE", "/rest/v1/webhook_rate_limits", {
+    status: 404,
+    body: { code: "PGRST205", message: "Could not find the table 'public.webhook_rate_limits'" }
+  });
+  mock.on("GET", "/rest/v1/organizations", { body: [{ id: ORG_ID, retention_days: 90 }] });
+  mock.on("GET", "/rest/v1/transcripts", { body: [] });
+
+  await purgeExpiredData(ENV, mock);
+  // Reaching the transcripts read at all proves the rate-limit cleanup failure
+  // did not abort the function.
+  assert.ok(mock.requests.some((r) => r.url.includes("/rest/v1/transcripts")));
+});
+
+// ---------------------------------------------------------------------------
+// Platform operator digest (cron, migration 0008)
+// ---------------------------------------------------------------------------
+
+const ENV_PLATFORM_ALERT = { ...ENV_TG, PLATFORM_ALERT_CHAT_ID: "555556666" };
+
+test("platformDigest: no-op without the platform chat id or the bot token", async () => {
+  const mock = createFetchMock();
+  await makeApi(mock, ENV_TG).platformDigest(); // no PLATFORM_ALERT_CHAT_ID
+  assert.equal(mock.requests.length, 0);
+
+  const mock2 = createFetchMock();
+  await makeApi(mock2, { ...ENV, PLATFORM_ALERT_CHAT_ID: "555556666" }).platformDigest(); // no bot token
+  assert.equal(mock2.requests.length, 0);
+});
+
+test("platformDigest: reports stuck-call counts per org and flags near/over quota", async () => {
+  const ORG_B = "88888888-8888-4888-8888-888888888888";
+  const mock = createFetchMock();
+  mock.on("GET", "/rest/v1/organizations", {
+    body: [
+      { id: ORG_ID, name: "Pilot Co", monthly_call_quota: 100 },
+      { id: ORG_B, name: "Second Co", monthly_call_quota: 50 }
+    ]
+  });
+  mock.on("GET", "/rest/v1/calls", (record) =>
+    record.url.includes("status=in") ? { body: [{ org_id: ORG_ID, status: "pending", error: "ai_key_missing" }, { org_id: ORG_ID, status: "pending", error: "ai_key_missing" }] } : { body: [] }
+  );
+  mock.on("GET", "/rest/v1/usage_counters", { body: [{ org_id: ORG_ID, calls_analyzed: 95 }, { org_id: ORG_B, calls_analyzed: 10 }] });
+  mock.on("POST", "api.telegram.org", { status: 200, body: { ok: true } });
+
+  await makeApi(mock, ENV_PLATFORM_ALERT).platformDigest();
+
+  const send = mock.requests.find((r) => r.url.includes("api.telegram.org"));
+  assert.ok(send, "the platform alert was sent");
+  assert.equal(send.body.chat_id, "555556666");
+  assert.match(send.body.text, /Организаций: 2/);
+  assert.match(send.body.text, /Застрявших звонков: 2/);
+  assert.match(send.body.text, /Pilot Co: 2/);
+  assert.match(send.body.text, /Pilot Co: 95\/100 — 80%\+ лимита/);
+  assert.equal(send.body.text.includes("Second Co:"), false, "Second Co is well under quota — not flagged");
+});
+
+test("platformDigest: an all-clear day still sends a short heartbeat", async () => {
+  const mock = createFetchMock();
+  mock.on("GET", "/rest/v1/organizations", { body: [{ id: ORG_ID, name: "Pilot Co", monthly_call_quota: 500 }] });
+  mock.on("GET", "/rest/v1/calls", { body: [] });
+  mock.on("GET", "/rest/v1/usage_counters", { body: [] });
+  mock.on("POST", "api.telegram.org", { status: 200, body: { ok: true } });
+
+  await makeApi(mock, ENV_PLATFORM_ALERT).platformDigest();
+  const send = mock.requests.find((r) => r.url.includes("api.telegram.org"));
+  assert.match(send.body.text, /Застрявших звонков: 0/);
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/app/status — public, unauthenticated
+// ---------------------------------------------------------------------------
+
+test("status: unconfigured deployment answers ok:false with no Supabase call", async () => {
+  const mock = createFetchMock();
+  const res = await makeApi(mock, {}).handle(get("/api/app/status"));
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { ok: false, supabase_configured: false });
+  assert.equal(mock.requests.length, 0);
+});
+
+test("status: reports Supabase reachability and per-migration flags, unauthenticated", async () => {
+  const mock = createFetchMock();
+  mock.on("GET", "/rest/v1/organizations", (record) => {
+    if (record.url.includes("rate_per_minute")) return { status: 400, body: { code: "42703" } }; // 0005 not applied
+    return { body: [{ id: ORG_ID }] }; // plain id probe + stt_provider probe both succeed
+  });
+  mock.on("GET", "/rest/v1/calls", { body: [] }); // retry_count probe succeeds (0008 applied)
+
+  const res = await makeApi(mock).handle(get("/api/app/status"));
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.supabase_reachable, true);
+  assert.equal(body.migrations["0005_billing_retention"], false);
+  assert.equal(body.migrations["0007_stt_provider"], true);
+  assert.equal(body.migrations["0008_ops_hardening"], true);
+});
+
+test("status: does not require a bearer token", async () => {
+  const mock = createFetchMock();
+  mock.on("GET", "/rest/v1/organizations", { body: [] });
+  mock.on("GET", "/rest/v1/calls", { body: [] });
+  const res = await makeApi(mock).handle(get("/api/app/status")); // no token
+  assert.notEqual(res.status, 401);
+});
+
+// ---------------------------------------------------------------------------
+// Bulk member add (migration-free — just a looped createOneMember)
+// ---------------------------------------------------------------------------
+
+test("members bulk POST: creates each row, returns a fresh generated password per row", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  let n = 0;
+  mock.on("POST", "/auth/v1/admin/users", () => ({ status: 200, body: { id: `u-${++n}` } }));
+  mock.on("POST", "/rest/v1/memberships", { status: 201 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send(
+      "POST",
+      `/api/app/orgs/${ORG_ID}/members/bulk`,
+      { members: [
+        { email: "a@pilot.test", full_name: "А", role: "manager", extension: "101" },
+        { email: "b@pilot.test", full_name: "Б", role: "lead", extension: "102" }
+      ] },
+      GOOD_TOKEN
+    )
+  );
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.results.length, 2);
+  assert.equal(body.results[0].ok, true);
+  assert.equal(body.results[0].email, "a@pilot.test");
+  assert.equal(typeof body.results[0].password, "string");
+  assert.ok(body.results[0].password.length >= 12, "a real generated password, not empty");
+  assert.notEqual(body.results[0].password, body.results[1].password, "each row gets its OWN password");
+
+  const authCreates = mock.requests.filter((r) => r.url.includes("/auth/v1/admin/users"));
+  assert.equal(authCreates.length, 2);
+  assert.equal(authCreates[0].body.password.length >= 12, true);
+});
+
+test("members bulk POST: one bad row does not abort the rest of the batch", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+  mock.on("POST", "/auth/v1/admin/users", (record) =>
+    record.body.email === "dup@pilot.test" ? { status: 422, body: {} } : { status: 200, body: { id: NEW_USER_ID } }
+  );
+  mock.on("POST", "/rest/v1/memberships", { status: 201 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+
+  const res = await makeApi(mock).handle(
+    send(
+      "POST",
+      `/api/app/orgs/${ORG_ID}/members/bulk`,
+      { members: [
+        { email: "dup@pilot.test", full_name: "X", role: "manager" },
+        { email: "ok@pilot.test", full_name: "Y", role: "manager" }
+      ] },
+      GOOD_TOKEN
+    )
+  );
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.results[0].ok, false);
+  assert.equal(body.results[0].error, "email_exists");
+  assert.equal(body.results[1].ok, true);
+});
+
+test("members bulk POST: an admin is still capped to lead/manager/viewer per row", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "admin");
+  const res = await makeApi(mock).handle(
+    send(
+      "POST",
+      `/api/app/orgs/${ORG_ID}/members/bulk`,
+      { members: [{ email: "x@pilot.test", full_name: "X", role: "admin" }] },
+      GOOD_TOKEN
+    )
+  );
+  const body = await res.json();
+  assert.equal(body.results[0].ok, false);
+  assert.equal(body.results[0].error, "forbidden");
+  assert.equal(mock.requests.some((r) => r.url.includes("/auth/v1/admin/users")), false);
+});
+
+test("members bulk POST: rejects an empty list and a batch over the row cap", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "owner");
+
+  const empty = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/members/bulk`, { members: [] }, GOOD_TOKEN)
+  );
+  assert.equal(empty.status, 400);
+
+  const tooMany = Array.from({ length: 51 }, (_, i) => ({ email: `u${i}@pilot.test`, full_name: "X", role: "manager" }));
+  const over = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/members/bulk`, { members: tooMany }, GOOD_TOKEN)
+  );
+  assert.equal(over.status, 400);
+  assert.equal((await over.json()).error, "too_many_rows");
+});
+
+test("members bulk POST: a viewer is refused before any row is processed", async () => {
+  const mock = createFetchMock();
+  seedAuth(mock);
+  seedMembership(mock, "viewer");
+  const res = await makeApi(mock).handle(
+    send("POST", `/api/app/orgs/${ORG_ID}/members/bulk`, { members: [{ email: "x@pilot.test", role: "manager" }] }, GOOD_TOKEN)
+  );
+  assert.equal(res.status, 403);
 });

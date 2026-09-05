@@ -83,6 +83,24 @@ const PLATFORM_SCAN_CAP = 5000;
 // the pilot has a single house rate and per-org overrides live in the DB.
 const PLATFORM_DEFAULT_RATE = 4;
 const RETENTION_DEFAULT_DAYS = 90;
+
+// Self-healing retry sweep (see sweepStuckCalls): a stuck call is retried at
+// most this many times, ~4h of headroom at the sweep's 30-minute cadence —
+// long enough for a customer to notice+fix a setup gap, short enough that a
+// permanently broken org (revoked PBX credential) does not retry forever.
+const RETRY_MAX_ATTEMPTS = 8;
+const RETRY_SWEEP_PAGE = 100; // bounded per tick per reason, next tick continues
+
+// Webhook rate limit (see checkWebhookRateLimit): a COURTESY backstop against
+// a leaked/misbehaving token flooding the endpoint and bloating audit_log —
+// NOT the hard boundary, which stays monthly_call_quota via reserveQuotaSlot.
+// 120/min = 2/sec sustained is generous headroom above any real call center's
+// webhook volume.
+const WEBHOOK_RATE_LIMIT_PER_MINUTE = 120;
+
+// Bulk member add: bounded per request so one paste cannot hang the isolate
+// or hammer the Supabase Auth admin API.
+const BULK_MEMBER_MAX_ROWS = 50;
 const BILLING_PLANS = new Set(["payg", "trial", "custom"]);
 const BILLING_CURRENCIES = new Set(["UAH", "USD", "EUR"]);
 const UI_LANGUAGES = new Set(["uk", "ru", "en"]); // matches organizations.ui_language CHECK (0004)
@@ -207,6 +225,50 @@ function sendTelegramMessage(env, fetchImpl, chatId, text) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text })
   });
+}
+
+// Best-effort webhook rate limit: one row per (integration, UTC minute) in
+// webhook_rate_limits (migration 0008), incremented per event. FAILS OPEN on
+// any error (missing table pre-0008, Supabase hiccup, read/write race) —
+// this is a courtesy backstop, never a reason to drop a real vendor's call.
+// Returns false only when the count for THIS minute is confirmed >= the cap.
+// One-time password for a bulk-added member — never reused, shown to the
+// admin exactly once in the response, never logged. 14 chars over a 62-symbol
+// alphabet is comfortably above the 8-char minimum with room to spare.
+const PASSWORD_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+function generatePassword() {
+  const bytes = crypto.getRandomValues(new Uint8Array(14));
+  let out = "";
+  for (const b of bytes) out += PASSWORD_ALPHABET[b % PASSWORD_ALPHABET.length];
+  return out;
+}
+
+async function checkWebhookRateLimit(env, fetchImpl, integrationId) {
+  try {
+    const bucket = Math.floor(Date.now() / 60_000);
+    const row = (await sbGet(env, fetchImpl, `webhook_rate_limits?${sbEq(
+      { integration_id: integrationId, minute_bucket: bucket },
+      { select: "count", limit: "1" }
+    )}`))?.[0];
+    if (!row) {
+      await sbPost(env, fetchImpl, `webhook_rate_limits?${new URLSearchParams({
+        on_conflict: "integration_id,minute_bucket"
+      })}`, {
+        headers: { prefer: "resolution=ignore-duplicates" },
+        body: { integration_id: integrationId, minute_bucket: bucket, count: 1 }
+      });
+      return true;
+    }
+    if (row.count >= WEBHOOK_RATE_LIMIT_PER_MINUTE) return false;
+    await sbPatch(env, fetchImpl, `webhook_rate_limits?${sbEq(
+      { integration_id: integrationId, minute_bucket: bucket }
+    )}`, {
+      body: { count: row.count + 1 }
+    });
+    return true;
+  } catch (_) {
+    return true;
+  }
 }
 
 // Invite tokens are DB-generated hex (48 chars by default); accepting 16..64
@@ -1168,6 +1230,153 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     return json({ ok: true, status: "queued" });
   }
 
+  // System-initiated retry for a call stuck at `transcribed` — either there was
+  // no default checklist yet, or a transient analysis error left it retryable
+  // (runAnalysisStage's own failure path sets status back to `transcribed`).
+  // Mirrors analyze()'s own quota+analysis flow faithfully (a NEW slot is
+  // reserved, exactly like a human clicking "Re-analyze" would spend one) —
+  // the only difference is actorId is null, like every other system-driven
+  // path (webhook ingest, cron). Void: called from the sweep, which owns its
+  // own bookkeeping (retry_count) and error isolation.
+  async function retryTranscribedAnalysis(orgId, callId) {
+    const org = await loadOrg(orgId);
+    if (!org) return;
+
+    const call = (await sbGet(env, fetchImpl, `calls?${sbEq(
+      { id: callId, org_id: orgId, status: "transcribed" },
+      { select: "id,manager_label,direction,duration_sec", limit: "1" }
+    )}`))?.[0];
+    if (!call) return; // no longer eligible — already moved on
+
+    const transcript = (await sbGet(env, fetchImpl, `transcripts?${sbEq(
+      { call_id: callId, org_id: orgId },
+      { select: "text", limit: "1" }
+    )}`))?.[0];
+    if (!transcript?.text) return;
+
+    const checklist = (await sbGet(env, fetchImpl, `checklists?${sbEq(
+      { org_id: orgId, is_default: "true" },
+      { select: "id,items", limit: "1" }
+    )}`))?.[0];
+    if (!checklist) return; // still no checklist — the next sweep tries again
+
+    const keyRow = (await sbGet(env, fetchImpl, `org_ai_keys?${sbEq(
+      { org_id: orgId, provider: org.ai_provider },
+      { select: "key_ciphertext", limit: "1" }
+    )}`))?.[0];
+    if (!keyRow) return;
+
+    const apiKey = await decryptSecret(keyRow.key_ciphertext, env.ORG_SECRET_KEY);
+    const period = `${new Date().toISOString().slice(0, 7)}-01`;
+    if (!(await reserveQuotaSlot(env, fetchImpl, orgId, period, org.monthly_call_quota))) return;
+
+    await runAnalysisStage({ orgId, actorId: null, org, call, transcriptText: transcript.text, checklist, apiKey, period });
+  }
+
+  // Self-healing pipeline: a stuck call recovers on its own once its blocker
+  // (AI key pasted, checklist created, PBX credentials fixed) is resolved —
+  // the customer never has to find and click "Retry" or file a ticket. Runs
+  // on the frequent cron tick (wrangler.toml). Two worklists, each bounded
+  // and oldest-first, retry_count bumped BEFORE the attempt so a crash
+  // mid-retry can never loop the same call forever; RETRY_MAX_ATTEMPTS caps a
+  // permanently-broken org (e.g. a revoked PBX credential) from retrying past
+  // ~4h. Silent no-op pre-0008 (no retry_count column) or Supabase down.
+  async function sweepStuckCalls() {
+    if (!env?.SUPABASE_URL || !env?.SUPABASE_SECRET_KEY) return;
+
+    let pending;
+    try {
+      const params = new URLSearchParams({ select: "id,org_id,source,retry_count", order: "updated_at.asc", limit: String(RETRY_SWEEP_PAGE) });
+      params.set("status", "eq.pending");
+      params.set("error", "in.(ai_key_missing,no_recording)");
+      params.set("retry_count", `lt.${RETRY_MAX_ATTEMPTS}`);
+      pending = await sbGet(env, fetchImpl, `calls?${params}`);
+    } catch (_) {
+      return; // pre-0008, or Supabase down — nothing to do
+    }
+    for (const row of Array.isArray(pending) ? pending : []) {
+      if (!row?.id || !row?.org_id || !TELEPHONY_KINDS.has(row.source)) continue;
+      try {
+        await sbPatch(env, fetchImpl, `calls?${sbEq({ id: row.id, org_id: row.org_id })}`, {
+          body: { retry_count: (row.retry_count || 0) + 1 }
+        });
+        await runIngestPipeline({ orgId: row.org_id, callId: row.id, kind: row.source, event: null });
+      } catch (_) {
+        // one broken call must not stop the sweep for the rest
+      }
+    }
+
+    let transcribed;
+    try {
+      const params = new URLSearchParams({ select: "id,org_id,retry_count", order: "updated_at.asc", limit: String(RETRY_SWEEP_PAGE) });
+      params.set("status", "eq.transcribed");
+      params.set("retry_count", `lt.${RETRY_MAX_ATTEMPTS}`);
+      transcribed = await sbGet(env, fetchImpl, `calls?${params}`);
+    } catch (_) {
+      return;
+    }
+    for (const row of Array.isArray(transcribed) ? transcribed : []) {
+      if (!row?.id || !row?.org_id) continue;
+      try {
+        await sbPatch(env, fetchImpl, `calls?${sbEq({ id: row.id, org_id: row.org_id })}`, {
+          body: { retry_count: (row.retry_count || 0) + 1 }
+        });
+        await retryTranscribedAnalysis(row.org_id, row.id);
+      } catch (_) {
+        // one broken call must not stop the sweep for the rest
+      }
+    }
+  }
+
+  // Platform-wide operator digest — sent to env.PLATFORM_ALERT_CHAT_ID (a
+  // wrangler secret Артур sets himself; unrelated to any client's own
+  // telegram_recipients). Runs on the daily cron beside the client digest.
+  // Silent no-op without the secret, TELEGRAM_BOT_TOKEN, or Supabase.
+  async function platformDigest() {
+    if (!env?.PLATFORM_ALERT_CHAT_ID || !env?.TELEGRAM_BOT_TOKEN) return;
+    if (!env?.SUPABASE_URL || !env?.SUPABASE_SECRET_KEY) return;
+
+    let orgs;
+    try {
+      orgs = await sbGet(env, fetchImpl, `organizations?${new URLSearchParams({
+        select: "id,name,monthly_call_quota",
+        limit: String(PLATFORM_SCAN_CAP)
+      })}`);
+    } catch (_) {
+      return;
+    }
+    if (!Array.isArray(orgs) || !orgs.length) return;
+    const orgNames = new Map(orgs.map((o) => [o.id, o.name || "?"]));
+
+    const stuckParams = new URLSearchParams({ select: "org_id,status,error", limit: String(PLATFORM_SCAN_CAP) });
+    stuckParams.set("status", "in.(pending,failed)");
+    const stuck = (await sbGet(env, fetchImpl, `calls?${stuckParams}`).catch(() => null)) || [];
+
+    const period = `${new Date().toISOString().slice(0, 7)}-01`;
+    const usageParams = new URLSearchParams({ select: "org_id,calls_analyzed", limit: String(PLATFORM_SCAN_CAP) });
+    usageParams.set("period", `eq.${period}`);
+    const usage = (await sbGet(env, fetchImpl, `usage_counters?${usageParams}`).catch(() => null)) || [];
+    const usedByOrg = new Map(usage.map((u) => [u.org_id, u.calls_analyzed || 0]));
+
+    const stuckByOrg = new Map();
+    for (const row of stuck) {
+      if (!row?.org_id) continue;
+      const entry = stuckByOrg.get(row.org_id) || 0;
+      stuckByOrg.set(row.org_id, entry + 1);
+    }
+
+    const quotaFlags = [];
+    for (const org of orgs) {
+      const used = usedByOrg.get(org.id) || 0;
+      const quota = org.monthly_call_quota || 0;
+      if (quota > 0 && used >= quota) quotaFlags.push(`${org.name || "?"}: ${used}/${quota} — лимит исчерпан`);
+      else if (quota > 0 && used / quota >= 0.8) quotaFlags.push(`${org.name || "?"}: ${used}/${quota} — 80%+ лимита`);
+    }
+
+    const text = buildPlatformDigestMessage(orgs.length, orgNames, stuckByOrg, quotaFlags);
+    await sendTelegramMessage(env, fetchImpl, env.PLATFORM_ALERT_CHAT_ID, text).catch(() => {});
+  }
+
   // POST /recordings: audio in -> STT (Gemini) -> the same analysis pipeline
   // as /analyze. ONE quota slot covers both stages of one call. Failures are
   // staged: STT fail = call `failed` + 502 transcription_failed; analysis
@@ -1517,27 +1726,25 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     return json({ members: rows || [] });
   }
 
-  async function addMember(request, orgId, user, membership) {
-    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+  // Shared core of addMember/addMembersBulk: validate one row, create the
+  // Supabase Auth user (service key, email_confirm — a director-added member
+  // is never self-registered), insert the membership, audit-log it (never the
+  // password). Returns a plain {error,status} or {ok:true,user_id} — never a
+  // Response — so the bulk loop can collect per-row results without a single
+  // early "return" short-circuiting the rest of the paste.
+  async function createOneMember(orgId, actorId, callerRole, row) {
+    const email = String(row?.email || "").trim();
+    const password = typeof row?.password === "string" && row.password ? row.password : generatePassword();
+    const fullName = String(row?.full_name || "").trim().slice(0, 120);
+    const role = String(row?.role || "");
+    const extension = row?.extension ? String(row.extension) : null;
+    const departmentId = row?.department_id ? String(row.department_id) : null;
 
-    const body = await request.json().catch(() => null);
-    const email = String(body?.email || "").trim();
-    const password = typeof body?.password === "string" ? body.password : "";
-    const fullName = String(body?.full_name || "").trim().slice(0, 120);
-    const role = String(body?.role || "");
-    const extension = body?.extension ? String(body.extension) : null;
-    const departmentId = body?.department_id ? String(body.department_id) : null;
+    if (!ROLES.has(role)) return { error: "bad_role", status: 400 };
+    if (callerRole === "admin" && !ADMIN_GRANTABLE.has(role)) return { error: "forbidden", status: 403 };
+    if (!email.includes("@")) return { error: "bad_credentials", status: 400 };
+    if (departmentId && !UUID_RE.test(departmentId)) return { error: "bad_department_id", status: 400 };
 
-    if (!ROLES.has(role)) return json({ error: "bad_role" }, 400);
-    if (membership.role === "admin" && !ADMIN_GRANTABLE.has(role)) {
-      return json({ error: "forbidden" }, 403);
-    }
-    if (!email.includes("@") || !password) return json({ error: "bad_credentials" }, 400);
-    if (departmentId && !UUID_RE.test(departmentId)) return json({ error: "bad_department_id" }, 400);
-
-    // Supabase Auth admin endpoint — the service key acts as both apikey and
-    // bearer. email_confirm skips the confirmation mail: members are created
-    // by their director, not self-registered.
     const response = await fetchImpl(`${env.SUPABASE_URL}/auth/v1/admin/users`, {
       method: "POST",
       headers: {
@@ -1552,20 +1759,15 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
       // which makes it a cross-tenant account oracle — so every hit lands in
       // the audit trail, where an enumeration burst is plainly visible.
       await sbPost(env, fetchImpl, "audit_log", {
-        body: {
-          org_id: orgId,
-          actor_id: user.id,
-          action: "member.add_failed",
-          meta: { reason: "email_exists" }
-        }
+        body: { org_id: orgId, actor_id: actorId, action: "member.add_failed", meta: { reason: "email_exists" } }
       }).catch(() => {});
-      return json({ error: "email_exists" }, 409);
+      return { error: "email_exists", status: 409 };
     }
-    if (!response.ok) return json({ error: "auth_create_failed" }, 502);
+    if (!response.ok) return { error: "auth_create_failed", status: 502 };
 
     const created = await response.json().catch(() => null);
     const userId = created?.id || created?.user?.id;
-    if (!userId) return json({ error: "auth_create_failed" }, 502);
+    if (!userId) return { error: "auth_create_failed", status: 502 };
 
     await sbPost(env, fetchImpl, "memberships", {
       body: {
@@ -1576,15 +1778,53 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
         extension,
         department_id: departmentId,
         status: "active",
-        invited_by: user.id
+        invited_by: actorId
       }
     });
     // No password in the audit trail, ever — the role is the interesting part.
     await sbPost(env, fetchImpl, "audit_log", {
-      body: { org_id: orgId, actor_id: user.id, action: "member.added", target: userId, meta: { role } }
+      body: { org_id: orgId, actor_id: actorId, action: "member.added", target: userId, meta: { role } }
     });
 
-    return json({ ok: true, user_id: userId });
+    return { ok: true, user_id: userId, email, password: row?.password ? undefined : password };
+  }
+
+  async function addMember(request, orgId, user, membership) {
+    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+
+    const body = await request.json().catch(() => null);
+    if (typeof body?.password !== "string" || !body.password) return json({ error: "bad_credentials" }, 400);
+
+    const result = await createOneMember(orgId, user.id, membership.role, body);
+    if (result.error) return json({ error: result.error }, result.status);
+    return json({ ok: true, user_id: result.user_id });
+  }
+
+  // POST /members/bulk — paste a list of new teammates at once (email; full
+  // name; extension; role per row). Each row gets a fresh random password
+  // (bulk-pasted rows never carry one) returned ONLY in this response, so the
+  // caller can hand it to the person once; nothing is logged or stored in
+  // plaintext. Bounded to BULK_MEMBER_MAX_ROWS so one paste cannot hang the
+  // isolate or hammer the Auth admin API. Partial success is normal: each row
+  // reports its own outcome, one bad row never aborts the rest of the batch.
+  async function addMembersBulk(request, orgId, user, membership) {
+    if (!["owner", "admin"].includes(membership.role)) return json({ error: "forbidden" }, 403);
+
+    const body = await request.json().catch(() => null);
+    const rows = Array.isArray(body?.members) ? body.members : null;
+    if (!rows || !rows.length) return json({ error: "bad_request" }, 400);
+    if (rows.length > BULK_MEMBER_MAX_ROWS) return json({ error: "too_many_rows" }, 400);
+
+    const results = [];
+    for (const row of rows) {
+      const outcome = await createOneMember(orgId, user.id, membership.role, { ...row, password: undefined });
+      results.push(
+        outcome.error
+          ? { email: String(row?.email || ""), ok: false, error: outcome.error }
+          : { email: outcome.email, ok: true, user_id: outcome.user_id, password: outcome.password }
+      );
+    }
+    return json({ results });
   }
 
   async function listIntegrations(orgId, membership) {
@@ -1803,6 +2043,41 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
       body: { org_id: orgId, actor_id: user.id, action: "org.settings_updated", meta: patch }
     }).catch(() => {});
     return json({ ok: true });
+  }
+
+  // GET /api/app/status — public, unauthenticated, no secrets. Reports whether
+  // Supabase answers and which migrations (0005/0007/0008) look applied, by
+  // probing a column each introduces. Built so Артур (or an uptime monitor)
+  // can check "did the SQL land yet" without me curl-probing authenticated
+  // routes to infer it indirectly.
+  async function getStatus() {
+    if (!env?.SUPABASE_URL || !env?.SUPABASE_SECRET_KEY) {
+      return json({ ok: false, supabase_configured: false });
+    }
+    const probe = async (path) => {
+      try {
+        await sbGet(env, fetchImpl, path);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    };
+    const reachable = await probe(`organizations?${new URLSearchParams({ select: "id", limit: "1" })}`);
+    const [billing, stt, opsHardening] = await Promise.all([
+      probe(`organizations?${new URLSearchParams({ select: "rate_per_minute", limit: "1" })}`),
+      probe(`organizations?${new URLSearchParams({ select: "stt_provider", limit: "1" })}`),
+      probe(`calls?${new URLSearchParams({ select: "retry_count", limit: "1" })}`)
+    ]);
+    return json({
+      ok: reachable,
+      supabase_configured: true,
+      supabase_reachable: reachable,
+      migrations: {
+        "0005_billing_retention": billing,
+        "0007_stt_provider": stt,
+        "0008_ops_hardening": opsHardening
+      }
+    });
   }
 
   // --- onboarding: invites & self-serve org creation -----------------------
@@ -2633,6 +2908,12 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     // 38h and nothing is stored meanwhile.
     if (!integration || integration.enabled !== true) return json({ ok: false }, 404);
 
+    // Courtesy rate limit BEFORE parsing/normalizing/any DB write — the
+    // cheapest possible early-out for a leaked or misbehaving token. Ack
+    // normally (never signal "blocked") so a legit PBX in a retry storm stops
+    // retrying, and a malicious sender learns nothing.
+    if (!(await checkWebhookRateLimit(env, fetchImpl, integration.id))) return webhookAck(kind);
+
     const body = await readWebhookBody(request);
     if (body === null) return json({ ok: false }, 413);
     if (!isCompletedCallEvent(kind, body)) {
@@ -2735,6 +3016,9 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     // itself instead: a valid invite token or the signup code.
     if (path === "/api/app/join" && method === "POST") return join(request);
     if (path === "/api/app/register-org" && method === "POST") return registerOrg(request);
+    // /api/app/status is handled earlier in handle(), before isConfigured() —
+    // it must answer even on a totally unconfigured deployment. Unreachable
+    // here; kept out of this dispatch on purpose.
 
     const user = await getUser(request, env, fetchImpl, tokenCache);
     if (!user) return json({ error: "unauthorized" }, 401);
@@ -2776,6 +3060,7 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     if (rest === "stt" && method === "PUT") return putStt(request, orgId, user, membership);
     if (rest === "members" && method === "GET") return listMembers(orgId);
     if (rest === "members" && method === "POST") return addMember(request, orgId, user, membership);
+    if (rest === "members/bulk" && method === "POST") return addMembersBulk(request, orgId, user, membership);
     if (rest === "integrations" && method === "GET") return listIntegrations(orgId, membership);
     if (rest === "telegram" && method === "GET") return getTelegramRecipients(orgId, membership);
     if (rest === "telegram" && method === "PUT") return putTelegramRecipients(request, orgId, user, membership);
@@ -2826,6 +3111,11 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     // OPTIONS with its configured CORS headers for every /api/* path.
     if (request.method === "OPTIONS") return null;
 
+    // /status answers even on a totally unconfigured deployment — "nothing is
+    // set yet" IS the answer it exists to give — so it bypasses the generic
+    // isConfigured() gate that every other route sits behind.
+    if (path === "/api/app/status" && request.method === "GET") return getStatus();
+
     if (!isConfigured()) return json({ error: "saas_not_configured" }, 503);
 
     try {
@@ -2839,7 +3129,7 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     }
   }
 
-  return { handle };
+  return { handle, sweepStuckCalls, platformDigest };
 }
 
 // ---------------------------------------------------------------------------
@@ -2879,6 +3169,29 @@ function buildDigestMessage(orgName, analyses) {
     "Менеджеры:",
     ...ranking.map((row, index) => `${index + 1}. ${row.name} — ${row.avg}/100 (${row.count} зв.)`)
   ].join("\n").slice(0, 3900);
+}
+
+// Operator-facing (Russian, matches every other Telegram surface in this
+// file). Always sent once a day — even "0 stuck" is a useful heartbeat that
+// the cron itself is alive, mirroring buildDigestMessage's own "no calls
+// yesterday" behaviour rather than going silent when there's nothing wrong.
+function buildPlatformDigestMessage(orgCount, orgNames, stuckByOrg, quotaFlags) {
+  const totalStuck = [...stuckByOrg.values()].reduce((sum, n) => sum + n, 0);
+  const lines = [
+    `🛠 CallControl — сводка платформы`,
+    `Организаций: ${orgCount}`,
+    `Застрявших звонков: ${totalStuck}`
+  ];
+  if (stuckByOrg.size) {
+    lines.push("По организациям:");
+    const rows = [...stuckByOrg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+    for (const [orgId, count] of rows) lines.push(`— ${orgNames.get(orgId) || "?"}: ${count}`);
+  }
+  if (quotaFlags.length) {
+    lines.push("Квота:");
+    for (const flag of quotaFlags.slice(0, 10)) lines.push(`— ${flag}`);
+  }
+  return lines.join("\n").slice(0, 3900);
 }
 
 // Yesterday's (UTC day) per-org digest to every `daily` Telegram recipient.
@@ -2962,8 +3275,27 @@ export async function dailyDigest(env, fetchImpl = fetch) {
 // Silent no-op before migration 0005: the organizations read naming
 // retention_days (or the transcripts read/PATCH naming redacted_at) fails and
 // is swallowed, so nothing is scrubbed until the columns exist.
+// Deletes webhook_rate_limits rows older than a day. The table (0008) exists
+// purely to answer "has this integration sent too many events THIS minute" —
+// a bucket is worthless once that minute has passed, so this keeps the table
+// from growing forever. Best-effort and independent of the retention purge
+// below: called first, wrapped in its own try/catch, so a failure here can
+// never block the (much more important) transcript/recording scrub.
+async function cleanupWebhookRateLimits(env, fetchImpl) {
+  try {
+    const cutoffBucket = Math.floor(Date.now() / 60_000) - 1440; // ~1 day of buckets
+    await sbRequestDelete(env, fetchImpl, `webhook_rate_limits?${new URLSearchParams({
+      minute_bucket: `lt.${cutoffBucket}`
+    })}`);
+  } catch (_) {
+    // pre-0008 (no such table) or a transient error — the next tick retries
+  }
+}
+
 export async function purgeExpiredData(env, fetchImpl = fetch) {
   if (!env?.SUPABASE_URL || !env?.SUPABASE_SECRET_KEY) return;
+
+  await cleanupWebhookRateLimits(env, fetchImpl);
 
   const nowIso = new Date().toISOString();
 

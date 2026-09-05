@@ -49,18 +49,25 @@ export default {
     return json({ ok: false, error: "not_found" }, 404, cors);
   },
 
-  // Cron entry (wrangler.toml [triggers]). Runs BOTH scheduled jobs each tick:
-  //   - dailyDigest: the daily Telegram digest (silent no-op without
-  //     TELEGRAM_BOT_TOKEN or the telegram_recipients table).
-  //   - purgeExpiredData: retention cleanup — scrubs raw transcript text and
-  //     recording links past each org's window (silent no-op pre-0005).
-  // allSettled + the per-job catch keep a partial Telegram/Supabase outage, or
-  // one failing job, from surfacing as a failed cron run or blocking the other.
+  // Cron entry (wrangler.toml [triggers]), branched by event.cron so the two
+  // triggers each do their own job — running the daily jobs on every 30-minute
+  // tick would resend the exact same digest over and over.
+  //   "0 17 * * *"    dailyDigest (per-org Telegram digest), purgeExpiredData
+  //                   (retention scrub), platformDigest (operator summary).
+  //   "*/30 * * * *"  sweepStuckCalls (self-healing retry for stuck calls).
+  // Every job is silent-no-op-safe (missing secret/migration) and
+  // allSettled + a per-job catch keep one failing job, or a partial
+  // Telegram/Supabase outage, from surfacing as a failed cron run or blocking
+  // the others.
   async scheduled(event, env, ctx) {
-    await Promise.allSettled([
-      dailyDigest(env).catch(() => {}),
-      purgeExpiredData(env).catch(() => {})
-    ]);
+    saasApi = saasApi || createApi({ env });
+    const jobs = [saasApi.sweepStuckCalls().catch(() => {})];
+    if (event.cron === "0 17 * * *") {
+      jobs.push(dailyDigest(env).catch(() => {}));
+      jobs.push(purgeExpiredData(env).catch(() => {}));
+      jobs.push(saasApi.platformDigest().catch(() => {}));
+    }
+    await Promise.allSettled(jobs);
   }
 };
 
