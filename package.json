@@ -9,7 +9,9 @@
     "smoke": "node scripts/smoke-check.js",
     "check": "node --check server.js && node --input-type=module --check < functions/api/leads.js && node --check cloudflare/src/worker.js && node --check saas/worker/ai.js && node --check saas/worker/crypto.js && node --check saas/worker/telephony.js && node --check saas/worker/api.js && node --check saas/worker/auth.js && node --check saas/worker/supabase-rest.js",
     "test:saas": "node --test saas/worker/*.test.js",
-    "build:cabinet": "vite build"
+    "build:cabinet": "vite build",
+    "test:cabinet": "node --test saas/cabinet/test/*.test.js",
+    "test": "npm run check && npm run test:saas && npm run test:cabinet"
   },
   "engines": {
     "node": ">=18"
