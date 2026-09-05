@@ -61,7 +61,15 @@ export default {
   // the others.
   async scheduled(event, env, ctx) {
     saasApi = saasApi || createApi({ env });
-    const jobs = [saasApi.sweepStuckCalls().catch(() => {})];
+    const jobs = [];
+    // Strict branch (not "always + extra on the daily tick"): 17:00 UTC is
+    // ALSO a "*/30 * * * *" boundary, so Cloudflare fires both triggers as two
+    // separate scheduled() calls around the same wall-clock minute. Running
+    // sweepStuckCalls unconditionally would let both invocations race the same
+    // worklist and double-process (and double-bill) the same stuck call.
+    if (event.cron === "*/30 * * * *") {
+      jobs.push(saasApi.sweepStuckCalls().catch(() => {}));
+    }
     if (event.cron === "0 17 * * *") {
       jobs.push(dailyDigest(env).catch(() => {}));
       jobs.push(purgeExpiredData(env).catch(() => {}));

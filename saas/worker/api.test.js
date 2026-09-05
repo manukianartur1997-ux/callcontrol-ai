@@ -3546,6 +3546,54 @@ test("sweep: a transcribed call with a checklist now available is scored and bil
   assert.ok(slot, "a NEW quota slot was reserved for the retry, exactly like a manual re-analyze");
 });
 
+test("sweep: an analysis failure during retry keeps the call `transcribed` (retryable), not `failed`", async () => {
+  // Regression test: retryTranscribedAnalysis must behave like /recordings
+  // (stt truthy -> stays "transcribed") not like the manual /analyze button
+  // (stt omitted -> "failed") — otherwise a transient error burns the call's
+  // very first sweep attempt and it silently drops out of every future sweep
+  // (the worklist only matches status=eq.transcribed), never reaching
+  // RETRY_MAX_ATTEMPTS as documented.
+  const mock = sweepReq();
+  mock.on("GET", "/rest/v1/calls", (record) => {
+    if (record.url.includes("status=eq.pending")) return { body: [] };
+    if (record.url.includes("status=eq.transcribed") && record.url.includes("retry_count")) {
+      return { body: [{ id: CALL_ID, org_id: ORG_ID, retry_count: 1 }] };
+    }
+    return { body: [{ id: CALL_ID, manager_label: "Іван", direction: "outbound", duration_sec: 120 }] };
+  });
+  mock.on("PATCH", "/rest/v1/calls", { status: 204 });
+  mock.on("GET", "/rest/v1/organizations", { body: [{ id: ORG_ID, monthly_call_quota: 500, timezone: "Europe/Kyiv", ai_provider: "gemini", ai_model: null }] });
+  mock.on("GET", "/rest/v1/transcripts", { body: [{ text: TRANSCRIPT }] });
+  mock.on("GET", "/rest/v1/checklists", { body: [{ id: CHECKLIST_ID, items: CHECKLIST_ITEMS }] });
+  mock.on("GET", "/rest/v1/org_ai_keys", { body: [{ key_ciphertext: await encryptSecret(GEMINI_PLAIN_KEY, MASTER_KEY) }] });
+  mock.on("POST", "generativelanguage.googleapis.com", { status: 500, body: { error: { message: "backend boom" } } });
+  // A pre-existing counter row: reserveQuotaSlot's CAS reservation and
+  // shiftUsage's later failure-refund both read/write this same row.
+  mock.on("GET", "/rest/v1/usage_counters", { body: [{ calls_analyzed: 5, tokens_in: 100, tokens_out: 50 }] });
+  mock.on("PATCH", "/rest/v1/usage_counters", (record) => ({ status: 200, body: [record.body] }));
+  mock.on("PATCH", "/rest/v1/org_ai_keys", { status: 204 });
+  mock.on("POST", "/rest/v1/audit_log", { status: 201 });
+
+  await makeApi(mock).sweepStuckCalls();
+
+  const statusPatch = mock.requests.find(
+    (r) => r.method === "PATCH" && r.url.includes("/rest/v1/calls") && "status" in r.body
+  );
+  assert.ok(statusPatch, "the failure path patched a status");
+  assert.equal(statusPatch.body.status, "transcribed", "stays retryable — must NOT become failed");
+
+  // shiftUsage's own PATCH always carries tokens_in/tokens_out alongside
+  // calls_analyzed; reserveQuotaSlot's CAS patch never does, so this
+  // specifically targets the failure-refund write.
+  const refund = mock.requests.find(
+    (r) => r.method === "PATCH" && r.url.includes("/rest/v1/usage_counters") && "tokens_in" in r.body
+  );
+  assert.ok(refund, "the reserved slot was refunded on failure");
+  assert.equal(refund.body.calls_analyzed, 4, "the reserved slot is refunded: -1 against the (stateless-mock) counter of 5");
+  assert.equal(refund.body.tokens_in, 100, "unchanged — no phantom STT tokens added on top");
+  assert.equal(refund.body.tokens_out, 50, "unchanged — no phantom STT tokens added on top");
+});
+
 test("sweep: no-ops before migration 0008 (retry_count column absent)", async () => {
   const mock = sweepReq();
   mock.on("GET", "/rest/v1/calls", {

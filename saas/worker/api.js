@@ -1270,7 +1270,13 @@ export function createApi({ env, fetchImpl = fetch } = {}) {
     const period = `${new Date().toISOString().slice(0, 7)}-01`;
     if (!(await reserveQuotaSlot(env, fetchImpl, orgId, period, org.monthly_call_quota))) return;
 
-    await runAnalysisStage({ orgId, actorId: null, org, call, transcriptText: transcript.text, checklist, apiKey, period });
+    // stt: {} (truthy, no token fields) rather than omitted — runAnalysisStage's
+    // failure branch uses `stt ? "transcribed" : "failed"` to decide whether the
+    // call stays retryable, and this path (like /recordings, unlike the manual
+    // /analyze button) must stay "transcribed" so the sweep keeps retrying it up
+    // to RETRY_MAX_ATTEMPTS. An empty object also means `stt?.tokensIn || 0`
+    // adds no phantom STT tokens — the transcript was already paid for earlier.
+    await runAnalysisStage({ orgId, actorId: null, org, call, transcriptText: transcript.text, checklist, apiKey, period, stt: {} });
   }
 
   // Self-healing pipeline: a stuck call recovers on its own once its blocker

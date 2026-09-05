@@ -11,7 +11,8 @@
     "test:saas": "node --test saas/worker/*.test.js",
     "build:cabinet": "vite build",
     "test:cabinet": "node --test saas/cabinet/test/*.test.js",
-    "test": "npm run check && npm run test:saas && npm run test:cabinet"
+    "test": "npm run check && npm run test:saas && npm run test:cabinet && npm run test:cron",
+    "test:cron": "node --test cloudflare-worker.example.test.js"
   },
   "engines": {
     "node": ">=18"

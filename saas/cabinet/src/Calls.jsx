@@ -35,7 +35,14 @@ const FILTER_LABELS = {
 // doubled-quote escaping — the one RFC 4180 rule that actually matters here
 // (customer names/comments are the only free-text fields in a call row).
 function csvField(value) {
-  const text = String(value ?? "");
+  let text = String(value ?? "");
+  // Formula-injection guard: customer_phone/manager_label originate from an
+  // unauthenticated telephony webhook (saas/worker/telephony.js normalizers),
+  // not sanitized upstream — this export is the actual trust boundary. A
+  // leading =, +, -, @ (or tab/CR) is a live formula trigger in Excel/Sheets;
+  // prefixing with an apostrophe is the standard neutralization (renders as
+  // literal text, the same trick spreadsheet apps use for "numbers as text").
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
